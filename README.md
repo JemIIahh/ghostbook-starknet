@@ -1,225 +1,183 @@
 # GhostBook
 
-> **TEE-first** confidential DEX on **Flare Testnet Coston2** — sealed swaps & orders via PrivacyRouter, CipherSign vault for policy-gated signing, Uniswap V3 settlement.
+> **Private limit orders & TWAPs on Starknet** — an STRK20 invoke anonymizer that fills user-committed order plans on Ekubo and returns the output straight into a private note.
 
-![Flare](https://img.shields.io/badge/Flare-Coston2-pink)
-![ChainID](https://img.shields.io/badge/chainId-114-blue)
-![TEE](https://img.shields.io/badge/TEE-PrivacyRouter%20%2B%20CipherSign-30d158)
+![Starknet](https://img.shields.io/badge/Starknet-SN__MAIN-orange)
+![Cairo](https://img.shields.io/badge/Cairo-Scarb%20%2B%20snforge-blue)
+![DEX](https://img.shields.io/badge/DEX-Ekubo-8a63d2)
 ![Next.js](https://img.shields.io/badge/Next.js-16-black)
 ![License](https://img.shields.io/badge/license-MIT-green)
 
 ## What it is
 
-GhostBook is a concentrated-liquidity DEX on Coston2 with **trading and signing gated by Trusted Execution Environments**:
+GhostBook turns the [Starknet privacy pool](https://github.com/starkware-libs/starknet-privacy/tree/main/packages/privacy)
+(STRK20) into a **private order book**. Instead of one unconstrained swap per private transaction,
+the user commits once to an `OrderPlan` — limit price, slice size, total budget, pacing interval,
+expiry — and every fill is checked against those terms on-chain.
 
-1. **Swap & Orders** — encrypt intent (ECIES) → escrow on **PrivacyRouter** → TEE match/attest → settle through Uniswap V3  
-2. **Vault** — **CipherSign** on Flare Confidential Compute (allowlist / cap / expiry before any payout signature)  
-3. **Pools / Liquidity / Admin** — public Uniswap V3 ops (create pools, LP, mint demo tokens)
+1. **Plan** — the frontend builds an `OrderPlan` and mirrors `plan_hash = poseidon(serialize(plan))` off-chain
+2. **Fill** — a private transaction withdraws a slice to `GhostBookAnonymizer`, which swaps one hop on
+   [Ekubo](https://ekubo.org) and returns the output as an `OpenNoteDeposit`
+3. **Repeat** — an untrusted executor can trigger further slices, but only within the committed plan
 
-Trade mintable demo tokens (**GHOST**, **BOOK**, **SPARK**) and Coston2 faucet tokens (**USDT0**, **FXRP**).
+The result is a private limit order / private TWAP: the pool (not the user) is the swap
+counterparty, and the order's schedule and limit never appear in a single revealing transaction.
 
 ### Privacy model (honest)
 
-| Sealed until fill | Visible on-chain |
-|-------------------|------------------|
-| `tokenOut`, minOut, salt, limit price | Escrow size (`amountIn`) |
-| Matching / quote inside TEE | Settlement swap amounts at fill (Uniswap) |
+| Stays private | Visible on-chain |
+|---|---|
+| Link between trader and trade | Ekubo swap: pool, per-slice amounts |
+| Parent order terms (limit, budget, pacing, expiry) | Each fill's `SliceFilled` event |
+| Plan identity (`salt` makes `plan_hash` unlinkable) | Note deposits into the privacy pool |
 
-## Features
+Slicing an order further weakens amount correlation, but it does not hide the swap itself.
 
-| Page | What you get |
-|------|----------------|
-| **Swap** | **TEE only** — encrypt → PrivacyRouter escrow → `/api/privacy/match` → attested `settle` |
-| **Orders** | **TEE only** — market (escrow+match+settle) · limit (escrow; **TEE fill** or cancel) |
-| **Vault** | CipherSign TEE policy lock + intent sign (Live FCC or Preview) |
-| **Pools** | Discover pairs; Manage opens Liquidity with pair + fee prefilled |
-| **Liquidity** | Add / remove concentrated LP with tick range |
-| **Admin** | Create pools, mint mocks, balances; navbar **Faucet** for all users |
+## Enforced plan terms
 
-## TEE trade pipeline
+| Field | Enforced on every fill |
+|---|---|
+| `limit_num` / `limit_den` | output `>= amount_in * limit_num / limit_den` |
+| `max_slice` | maximum input per fill |
+| `total_amount` | maximum cumulative input across fills |
+| `min_interval` | minimum seconds between fills (TWAP / DCA pacing) |
+| `expiry` | no fill after this timestamp |
+| `salt` | user secret; keeps the plan key unlinkable |
 
-```text
-Wallet
-  │  1. Encrypt swap/order intent with TEE pubkey (ECIES)
-  ▼
-PrivacyRouter
-  │  2. submitIntent — escrow tokenIn + commitment + ciphertext
-  ▼
-TEE (/api/privacy/match)
-  │  3. Decrypt · quote Uniswap · sign settlement digest
-  ▼
-PrivacyRouter.settle
-  │  4. Verify TEE ECDSA → swapSingle → pay recipient
-```
+State is keyed by `plan_hash`, so terms are self-authenticating: there is no registration step, and
+changing any field yields a different key instead of mutating a live order's budget. Only the
+privacy pool set in the constructor may call `privacy_invoke`.
 
-Shared client: `src/lib/privacy/trade.ts` (used by Swap + Orders).
-
-## Tech Stack
+## Tech stack
 
 | Layer | Technology |
-|-------|------------|
-| **Network** | Flare Testnet Coston2 (chainId `114`), gas = **C2FLR** |
-| **DEX** | Solidity Uniswap V3 (Hardhat) |
-| **Privacy** | PrivacyRouter + server TEE attestor (`PRIVACY_TEE_PRIVATE_KEY`) |
-| **Ops TEE** | CipherSign FCC stack in `cipher-sign/` |
+|---|---|
+| **Network** | Starknet mainnet (`SN_MAIN`), Sepolia for testing |
+| **Contract** | Cairo (`starknet/`), Scarb + Starknet Foundry (`snforge`) |
+| **DEX** | Ekubo router (`swap` + `IClear`) |
+| **Privacy** | STRK20 privacy pool + `strk20InvokeTransaction` wallet API |
 | **Frontend** | Next.js 16, React 19, TypeScript, Tailwind CSS 4 |
-| **Wallet** | wagmi + Reown AppKit (MetaMask / WalletConnect) |
+| **Wallet** | `starknet.js` 10 + `@starknet-io/get-starknet` (wallet standard) |
 
-## Deployed contracts (Coston2)
+## Mainnet addresses
 
-Explorer: [coston2-explorer.flare.network](https://coston2-explorer.flare.network)
+| | |
+|---|---|
+| STRK20 privacy pool | `0x040337b1af3c663e86e333bab5a4b28da8d4652a15a69beee2b677776ffe812a` |
+| Ekubo router (`swap` + `IClear`) | `0x0199741822c2dc722f6f605204f35e56dbc23bceed54818168c4c49e4fb8737e` |
+| Ekubo Core (pool discovery) | `0x00000005dd3d2f4429af886cd1a3b08289dbcea99a294197e9eb43b0e0325b4b` |
+| RPC | `https://rpc.starknet.lava.build` |
+| Explorer | [voyager.online](https://voyager.online) |
 
-| Contract | Address | Explorer |
-|----------|---------|----------|
-| **PrivacyRouter** | `0x0c885d338123149493E16cFAd53969bC06B49722` | [View](https://coston2-explorer.flare.network/address/0x0c885d338123149493E16cFAd53969bC06B49722) |
-| Factory | `0x5E6658ac6cBC9b0109C28BED00bC4Af0F0A3f1CD` | [View](https://coston2-explorer.flare.network/address/0x5E6658ac6cBC9b0109C28BED00bC4Af0F0A3f1CD) |
-| Manager | `0x90Dfd581393104EAe03Fd349b4867A7E8F51313b` | [View](https://coston2-explorer.flare.network/address/0x90Dfd581393104EAe03Fd349b4867A7E8F51313b) |
-| Quoter | `0x68BB922f1c1466108206D873c370617697Cd4271` | [View](https://coston2-explorer.flare.network/address/0x68BB922f1c1466108206D873c370617697Cd4271) |
-| TestUtils | `0x27603a61d2eCD51940558EC4eD3bd182C13485E7` | [View](https://coston2-explorer.flare.network/address/0x27603a61d2eCD51940558EC4eD3bd182C13485E7) |
-| GHOST | `0x1daBC80337bF2d85d496c4eD9cE63a1b16Fbd539` | [View](https://coston2-explorer.flare.network/address/0x1daBC80337bF2d85d496c4eD9cE63a1b16Fbd539) |
-| BOOK | `0x284E2F5585eAb8860b6b541e561a4F3aC98DCC08` | [View](https://coston2-explorer.flare.network/address/0x284E2F5585eAb8860b6b541e561a4F3aC98DCC08) |
-| SPARK | `0xcf2dfCa5804a0f32D8bB233dF0898B8238b40658` | [View](https://coston2-explorer.flare.network/address/0xcf2dfCa5804a0f32D8bB233dF0898B8238b40658) |
-
-Synced in `src/lib/uniswapConfig.ts`. TEE signer for PrivacyRouter must match `PRIVACY_TEE_PRIVATE_KEY` / `FAUCET_PRIVATE_KEY` (deployer).
-
-### Tokens
-
-| Token | Address | Mintable | Explorer |
-|-------|---------|----------|----------|
-| GHOST | `0x1daBC80337bF2d85d496c4eD9cE63a1b16Fbd539` | Yes (owner / faucet API) | [View](https://coston2-explorer.flare.network/address/0x1daBC80337bF2d85d496c4eD9cE63a1b16Fbd539) |
-| BOOK | `0x284E2F5585eAb8860b6b541e561a4F3aC98DCC08` | Yes | [View](https://coston2-explorer.flare.network/address/0x284E2F5585eAb8860b6b541e561a4F3aC98DCC08) |
-| SPARK | `0xcf2dfCa5804a0f32D8bB233dF0898B8238b40658` | Yes | [View](https://coston2-explorer.flare.network/address/0xcf2dfCa5804a0f32D8bB233dF0898B8238b40658) |
-| USDT0 | `0xC1A5B41512496B80903D1f32d6dEa3a73212E71F` | No (Coston2 faucet) | [View](https://coston2-explorer.flare.network/address/0xC1A5B41512496B80903D1f32d6dEa3a73212E71F) |
-| FXRP | `0x0b6A3645c240605887a5532109323A3E12273dc7` | No (Coston2 faucet) | [View](https://coston2-explorer.flare.network/address/0x0b6A3645c240605887a5532109323A3E12273dc7) |
-| WC2FLR (WNat) | `0xC67DCE33D7A8efA5FfEB961899C73fe01bCe9273` | No (system) | [View](https://coston2-explorer.flare.network/address/0xC67DCE33D7A8efA5FfEB961899C73fe01bCe9273) |
-
-### CipherSign vault (ops TEE)
-
-| Item | Value |
-|------|-------|
-| InstructionSender | [`0x79bB3e509B6a0f43d506a761Fb022221c3FF0Ee9`](https://coston2-explorer.flare.network/address/0x79bB3e509B6a0f43d506a761Fb022221c3FF0Ee9) |
-| Stack | `cipher-sign/tee` (Docker FCC + ext-proxy) |
-
-Vault gates **operator signatures** (allowlist, max amount, expiry). Trading uses PrivacyRouter, not public `swapSingle` from the UI.
-
-### Redeploy PrivacyRouter
-
-```bash
-cd uniswap-implementation
-npx hardhat run scripts/deployPrivacyRouter.ts --network coston2
-```
-
-Then set `NEXT_PUBLIC_PRIVACY_ROUTER` / `uniswapConfig.privacyRouter` and keep `PRIVACY_TEE_PRIVATE_KEY` = `teeSigner`.
+Traded tokens (deep Ekubo liquidity): **STRK**, **ETH**, **USDC**. All values live in
+`src/lib/starknet/config.ts`; the deployed anonymizer address comes from
+`NEXT_PUBLIC_ANONYMIZER_MAINNET`.
 
 ## Quick start
 
 ### Prerequisites
 
 - Node.js 18+ and [pnpm](https://pnpm.io)
-- MetaMask on **Flare Testnet Coston2** (chainId `114`)
-- C2FLR for gas — [Coston2 Faucet](https://faucet.flare.network/coston2)
+- A Starknet wallet with STRK20 / privacy-pool support
+- [Scarb](https://docs.swmansion.com/scarb/) + [Starknet Foundry](https://foundry-rs.github.io/starknet-foundry/) for the contract
 
 ### Run the app
 
 ```bash
 pnpm install
-cp .env.example .env.local
-# Set FAUCET_PRIVATE_KEY (token owner) — also used as Privacy TEE attestor
-# NEXT_PUBLIC_PRIVACY_ROUTER is already set for the deployed router
 pnpm dev
 ```
 
 Open [http://localhost:3000](http://localhost:3000).
 
-### Suggested demo flow
+### Contract
 
-1. Connect wallet on Coston2  
-2. **Faucet** (navbar) or **Admin** → get GHOST / BOOK / SPARK  
-3. **Admin** → create pool (e.g. GHOST + BOOK, fee `0.30%`, price like `100`)  
-4. **Liquidity** → Use Mock Params → Approve → Add Liquidity  
-5. **Swap** — TEE private swap  
-6. **Orders** — TEE market settle, or limit escrow + **TEE fill**  
-7. **Vault** — lock CipherSign policy and request a signature (Preview or Live)
+```bash
+cd starknet
+scarb fmt
+scarb build
+snforge test        # 18 tests: access control, caps, pacing, expiry, limit price, partial fills
+```
+
+Declare and deploy (constructor takes the privacy pool address):
+
+```bash
+scarb --profile release build
+sncast --account <ACCOUNT> declare --contract-name GhostBookAnonymizer --network mainnet
+sncast --account <ACCOUNT> deploy --class-hash <CLASS_HASH> \
+  --constructor-calldata 0x040337b1af3c663e86e333bab5a4b28da8d4652a15a69beee2b677776ffe812a \
+  --network mainnet
+```
+
+### Pool / quote helpers
+
+Ekubo pool keys are `(token0, token1, fee, tick_spacing, extension)` and cannot be guessed:
+
+```bash
+node scripts/find-pools.mjs STRK USDC   # probe fee/tick-spacing grid for real liquidity
+node scripts/quote.mjs STRK ETH 1       # quote the exact router the anonymizer calls
+```
 
 ### Environment variables
 
 | Variable | Description |
-|----------|-------------|
+|---|---|
 | `NEXT_PUBLIC_SITE_URL` | Canonical URL for OG / sitemap (production) |
-| `NEXT_PUBLIC_RPC_URL` | Coston2 RPC |
-| `NEXT_PUBLIC_CHAIN_ID` | `114` |
-| `NEXT_PUBLIC_PROJECT_ID` | Optional Reown / WalletConnect project id |
-| `NEXT_PUBLIC_PRIVACY_ROUTER` | PrivacyRouter address |
-| `PRIVACY_TEE_PRIVATE_KEY` | TEE attestor (defaults to `FAUCET_PRIVATE_KEY`) — must match router `teeSigner` |
-| `FAUCET_PRIVATE_KEY` | MockToken owner for `/api/faucet` + Admin mint |
-| `NEXT_PUBLIC_FCC_DIRECT_URL` | Usually `/fcc` (Next rewrite) for CipherSign Live |
-| `NEXT_PUBLIC_FCC_DIRECT_API_KEY` | Same as tee `DIRECT_API_KEY` |
-| `FCC_PROXY_URL` | `http://127.0.0.1:6674` or tunnel URL |
+| `NEXT_PUBLIC_RPC_URL_MAINNET` | Starknet mainnet RPC (default: Lava) |
+| `NEXT_PUBLIC_RPC_URL_SEPOLIA` | Starknet Sepolia RPC |
+| `NEXT_PUBLIC_ANONYMIZER_MAINNET` | Deployed `GhostBookAnonymizer` (mainnet) |
+| `NEXT_PUBLIC_ANONYMIZER_SEPOLIA` | Deployed `GhostBookAnonymizer` (Sepolia) |
+| `NEXT_PUBLIC_PRIVACY_POOL_SEPOLIA` | Privacy pool address when testing on Sepolia |
+| `NEXT_PUBLIC_EKUBO_ROUTER_SEPOLIA` | Ekubo router address when testing on Sepolia |
 
-### Live CipherSign TEE (Vault)
+## Calling the anonymizer
 
-```bash
-cd cipher-sign/tee
-cp .env.example .env   # PRIVATE_KEY, DIRECT_API_KEY, LOCAL_MODE=false, SIMULATED_TEE=true
-./scripts/full-setup.sh
+One private transaction: withdraw a slice to the anonymizer, open a note for the output, invoke.
+`"OPEN"`, `"${poolAddress}"` and `"${openNoteIds[0]}"` are literal placeholders substituted by the
+wallet — never hex-encode them:
+
+```ts
+const actions: WALLET_API.STRK20_ACTION[] = [
+  { type: "withdraw", token: tokenIn, amount: num.toHex(slice), recipient: anonymizer },
+  { type: "transfer", token: tokenOut, amount: "OPEN", recipient: account },
+  { type: "invoke", contract: anonymizer, calldata: [...planCalldata, router, num.toHex(slice), "0x0", "${openNoteIds[0]}"] },
+];
+await walletAccount.strk20InvokeTransaction(actions);
 ```
-
-Then in `.env.local`:
-
-```bash
-NEXT_PUBLIC_FCC_DIRECT_URL=/fcc
-NEXT_PUBLIC_FCC_DIRECT_API_KEY=<same DIRECT_API_KEY>
-FCC_PROXY_URL=http://127.0.0.1:6674
-```
-
-Restart `pnpm dev`. Vault **Preview** works without Docker; Live needs the FCC proxy. Runbook: `cipher-sign/docs/SETUP.md`.
-
-### Redeploy Uniswap (Hardhat)
-
-```bash
-cd uniswap-implementation
-npx hardhat run scripts/deployUniswapV3Factory.ts --network coston2
-npx hardhat run scripts/deployUniswapV3Manager.ts --network coston2
-npx hardhat run scripts/deployUniswapV3Quoter.ts --network coston2
-npx hardhat run scripts/testUtilsDeployment.ts --network coston2
-npx hardhat run scripts/deployMockTokens.ts --network coston2
-npx hardhat run scripts/deployPrivacyRouter.ts --network coston2
-```
-
-Copy addresses into `src/lib/uniswapConfig.ts`.
 
 ## Project structure
 
 ```
 ghostbook/
-├── cipher-sign/                 # FCC / CipherSign TEE (Vault)
-├── uniswap-implementation/      # Hardhat Uniswap V3 + PrivacyRouter
+├── starknet/                    # Cairo contract (Scarb + snforge)
+│   ├── src/ghostbook_anonymizer.cairo
+│   ├── src/test_contracts/      # mock ERC-20, mock Ekubo router
+│   └── src/tests/
+├── scripts/                     # find-pools.mjs, quote.mjs (Ekubo probes)
 ├── public/                      # Brand assets
-├── src/
-│   ├── app/
-│   │   ├── privacy/             # TEE Swap UI
-│   │   ├── orders/              # TEE market / limit
-│   │   ├── vault/               # CipherSign
-│   │   ├── pools/ · liquidity/ · admin/
-│   │   └── api/
-│   │       ├── faucet/          # GHOST/BOOK/SPARK drip
-│   │       └── privacy/         # TEE info + match/attest
-│   ├── components/
-│   ├── context/
-│   └── lib/
-│       ├── privacy/             # ECIES encrypt, trade client, ABIs
-│       ├── cipherSign/          # FCC /direct client
-│       └── uniswapConfig.ts
-└── .env.example
+└── src/
+    ├── app/                     # Next.js routes (orders/, landing, metadata)
+    ├── components/
+    ├── context/
+    └── lib/
+        ├── starknet/config.ts   # networks, addresses, tokens, provider
+        └── strk20/plan.ts       # OrderPlan mirror, poseidon plan hash, pool keys
 ```
 
-## Notes
+## Status
 
-- Default fee tier in the UI is **0.30%** (`3000`). Pool fee must match.  
-- Public Uniswap swap UI is removed; `/swap` redirects to TEE Swap (`/privacy`).  
-- Display amounts are formatted to **2 decimal places**.  
-- Build uses webpack (`pnpm run build`) to avoid Turbopack icon-collision panics.
+The Cairo anonymizer and its test suite are the source of truth; `src/lib/starknet` and
+`src/lib/strk20` are the Starknet client layer. The remaining UI under `src/app` and
+`src/components` is still being ported to Starknet — some modules there still reference the
+previous EVM implementation and are being replaced.
+
+## References
+
+- [Privacy pool contract](https://github.com/starkware-libs/starknet-privacy/tree/main/packages/privacy)
+- [Reference `EkuboSwapAnonymizer`](https://github.com/starkware-libs/starknet-privacy/tree/main/packages/ekubo_swap_anonymizer)
+- [STRK20 by Example](https://strk20-by-example.org/)
+- [Ekubo](https://ekubo.org)
 
 ---
 
-*Built for Flare Testnet Coston2 · TEE-sealed trading + CipherSign vault.*
+*Private limit orders and TWAPs on Starknet — committed plans, public settlement, unlinkable traders.*
