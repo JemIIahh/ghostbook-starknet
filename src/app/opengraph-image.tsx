@@ -1,7 +1,7 @@
 import { ImageResponse } from "next/og";
 
 export const runtime = "edge";
-export const alt = "GhostBook — Confidential trading with Flare TEEs";
+export const alt = "GhostBook — Private orders on Starknet";
 export const size = { width: 1200, height: 630 };
 export const contentType = "image/png";
 
@@ -67,7 +67,7 @@ export default async function OpenGraphImage() {
                 marginTop: 4,
               }}
             >
-              Flare TEE
+              STRK20
             </div>
           </div>
         </div>
@@ -83,7 +83,7 @@ export default async function OpenGraphImage() {
               maxWidth: 900,
             }}
           >
-            Confidential trading with Flare TEEs
+            Private orders on Starknet
           </div>
           <div
             style={{
@@ -93,8 +93,7 @@ export default async function OpenGraphImage() {
               maxWidth: 820,
             }}
           >
-            TEE-sealed swaps & orders · CipherSign vault · Uniswap V3 settlement on
-            Coston2
+            Private limit orders & TWAP · enforced on-chain · filled through Ekubo
           </div>
         </div>
 
@@ -135,7 +134,7 @@ export default async function OpenGraphImage() {
               fontWeight: 500,
             }}
           >
-            chainId 114 · Coston2
+            Starknet mainnet · SN_MAIN
           </div>
         </div>
       </div>

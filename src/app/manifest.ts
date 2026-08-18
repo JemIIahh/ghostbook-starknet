@@ -5,7 +5,7 @@ export default function manifest(): MetadataRoute.Manifest {
     name: "GhostBook",
     short_name: "GhostBook",
     description:
-      "Confidential DEX on Flare Coston2 — TEE-sealed swaps, orders, and CipherSign vault.",
+      "Private limit orders and TWAP on Starknet, settled into STRK20 private notes.",
     start_url: "/",
     display: "standalone",
     background_color: "#000000",

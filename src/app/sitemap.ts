@@ -5,17 +5,9 @@ export default function sitemap(): MetadataRoute.Sitemap {
     process.env.NEXT_PUBLIC_SITE_URL ||
     (process.env.VERCEL_PROJECT_PRODUCTION_URL
       ? `https://${process.env.VERCEL_PROJECT_PRODUCTION_URL}`
-      : "https://ghostbook.flare");
+      : "https://ghostbook.xyz");
 
-  const paths = [
-    "",
-    "/privacy",
-    "/orders",
-    "/pools",
-    "/liquidity",
-    "/vault",
-    "/admin",
-  ];
+  const paths = ["", "/orders", "/private"];
 
   const now = new Date();
 
@@ -23,6 +15,6 @@ export default function sitemap(): MetadataRoute.Sitemap {
     url: `${base}${path || "/"}`,
     lastModified: now,
     changeFrequency: path === "" ? "weekly" : "monthly",
-    priority: path === "" ? 1 : path === "/privacy" || path === "/orders" ? 0.9 : 0.7,
+    priority: path === "" ? 1 : 0.9,
   }));
 }

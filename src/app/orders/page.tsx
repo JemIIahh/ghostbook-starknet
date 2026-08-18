@@ -28,7 +28,6 @@ import {
   bpsFromFee,
   fromSmallestUnit,
   limitPriceOf,
-  planHash,
   requiredOut,
   toSmallestUnit,
   tokenOutOf,

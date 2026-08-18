@@ -23,7 +23,7 @@ const siteUrl =
 
 const title = "GhostBook";
 const description =
-  "Confidential DEX on Flare Coston2. TEE-sealed swaps & orders, CipherSign vault, Uniswap V3 settlement — privacy where it matters, onchain where it must.";
+  "Private limit orders and TWAP on Starknet. Commit your order terms once; a Cairo anonymizer enforces limit price, slice size, pacing and expiry on every fill, routing through Ekubo and settling into STRK20 private notes.";
 
 export const viewport: Viewport = {
   themeColor: [
@@ -39,18 +39,19 @@ export const viewport: Viewport = {
 export const metadata: Metadata = {
   metadataBase: new URL(siteUrl),
   title: {
-    default: `${title} — Confidential trading with Flare TEEs`,
+    default: `${title} — Private orders on Starknet`,
     template: `%s · ${title}`,
   },
   description,
   applicationName: title,
   keywords: [
     "GhostBook",
-    "Flare",
-    "Coston2",
-    "TEE",
+    "Starknet",
+    "STRK20",
+    "Cairo",
+    "Ekubo",
+    "privacy pool",
     "FCC",
-    "CipherSign",
     "privacy DEX",
     "sealed orders",
     "Uniswap V3",
@@ -81,12 +82,12 @@ export const metadata: Metadata = {
     locale: "en_US",
     url: "/",
     siteName: title,
-    title: `${title} — Confidential trading with Flare TEEs`,
+    title: `${title} — Private orders on Starknet`,
     description,
   },
   twitter: {
     card: "summary_large_image",
-    title: `${title} — Confidential trading with Flare TEEs`,
+    title: `${title} — Private orders on Starknet`,
     description,
   },  robots: {
     index: true,
