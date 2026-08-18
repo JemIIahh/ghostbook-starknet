@@ -49,3 +49,6 @@ next-env.d.ts
 # cairo build output
 contracts/target/
 .env.local
+
+# cairo / scarb build output
+starknet/target/
