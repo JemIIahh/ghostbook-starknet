@@ -1,0 +1,35 @@
+{
+  "network": "coston2",
+  "uniswap": {
+    "factory": "0x5E6658ac6cBC9b0109C28BED00bC4Af0F0A3f1CD",
+    "manager": "0x90Dfd581393104EAe03Fd349b4867A7E8F51313b",
+    "quoter": "0x68BB922f1c1466108206D873c370617697Cd4271",
+    "testutils": "0x27603a61d2eCD51940558EC4eD3bd182C13485E7",
+    "ghost": "0x1daBC80337bF2d85d496c4eD9cE63a1b16Fbd539",
+    "book": "0x284E2F5585eAb8860b6b541e561a4F3aC98DCC08",
+    "spark": "0xcf2dfCa5804a0f32D8bB233dF0898B8238b40658",
+    "pumpaz": "0x1daBC80337bF2d85d496c4eD9cE63a1b16Fbd539",
+    "nia": "0x284E2F5585eAb8860b6b541e561a4F3aC98DCC08",
+    "wDot": "0xcf2dfCa5804a0f32D8bB233dF0898B8238b40658"
+  },
+  "tokens": {
+    "ghost": {
+      "symbol": "GHOST",
+      "name": "GhostBook Token",
+      "address": "0x1daBC80337bF2d85d496c4eD9cE63a1b16Fbd539",
+      "decimals": 18
+    },
+    "book": {
+      "symbol": "BOOK",
+      "name": "Book Token",
+      "address": "0x284E2F5585eAb8860b6b541e561a4F3aC98DCC08",
+      "decimals": 18
+    },
+    "spark": {
+      "symbol": "SPARK",
+      "name": "Spark Token",
+      "address": "0xcf2dfCa5804a0f32D8bB233dF0898B8238b40658",
+      "decimals": 18
+    }
+  }
+}

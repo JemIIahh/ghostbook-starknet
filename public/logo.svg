@@ -1,0 +1,23 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" fill="none">
+  <defs>
+    <linearGradient id="ghostGrad" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#6366f1"/>
+      <stop offset="100%" stop-color="#1e1b4b"/>
+    </linearGradient>
+    <filter id="glow">
+      <feGaussianBlur stdDeviation="4" result="blur"/>
+      <feMerge>
+        <feMergeNode in="blur"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+  </defs>
+  <!-- Ghost body -->
+  <path d="M256 48C160 48 80 128 80 224v192c0 0 0 24 24 24s32-24 48-24 32 24 48 24 32-24 56-24 32 24 56 24 32-24 48-24 32 24 48 24 24 0 24-24V224c0-96-80-176-176-176z" fill="url(#ghostGrad)"/>
+  <!-- Left eye -->
+  <ellipse cx="200" cy="230" rx="32" ry="38" fill="#0f0b2e"/>
+  <ellipse cx="204" cy="224" rx="14" ry="16" fill="#a5b4fc" filter="url(#glow)"/>
+  <!-- Right eye -->
+  <ellipse cx="312" cy="230" rx="32" ry="38" fill="#0f0b2e"/>
+  <ellipse cx="316" cy="224" rx="14" ry="16" fill="#a5b4fc" filter="url(#glow)"/>
+</svg>

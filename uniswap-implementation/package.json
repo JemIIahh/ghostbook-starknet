@@ -1,0 +1,17 @@
+{
+  "name": "hardhat-project",
+  "devDependencies": {
+    "hardhat": "^2.26.3",
+    "@nomicfoundation/hardhat-toolbox": "^6.1.0",
+    "@nomicfoundation/hardhat-verify": "^2.0.10",
+    "@openzeppelin/contracts": "^5.0.2",
+    "dotenv": "^16.4.5",
+    "typescript": "^5.4.5",
+    "ts-node": "^10.9.2"
+  },
+  "dependencies": {
+    "prb-math": "^2.4.3",
+    "solidity-bytes-utils": "^0.8.4",
+    "solmate": "^6.8.0"
+  }
+}
