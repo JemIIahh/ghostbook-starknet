@@ -1,354 +1,183 @@
 "use client";
 
-import { ArrowLeftRight, Shield, Lock, Eye, ArrowRight, Zap, BookOpen } from "lucide-react";
-import { motion } from "framer-motion";
-import Image from "next/image";
 import Link from "next/link";
-import { useWallet } from "@/context/WalletContext";
+import Image from "next/image";
+import { motion } from "framer-motion";
+import { ArrowRight, Clock, Eye, Lock, ShieldCheck, Split } from "lucide-react";
 import GhostLogo from "@/components/GhostLogo";
-import FaucetButton from "@/components/FaucetButton";
+import ConnectButton from "@/components/wallet/ConnectButton";
+import { useWallet } from "@/context/WalletContext";
+import { MAINNET, explorerContractUrl } from "@/lib/starknet/config";
 
-const features = [
+const FEATURES = [
   {
     icon: Lock,
-    title: "Private Swap",
-    description:
-      "Encrypt swap intent to the TEE, escrow on PrivacyRouter, match privately, settle with an attested signature.",
+    title: "Terms committed once",
+    body: "A plan fixes the limit price, slice size, total budget, pacing and expiry. The anonymizer stores only poseidon(plan), so the terms authenticate themselves on every fill.",
   },
   {
-    icon: Shield,
-    title: "TEE Vault",
-    description:
-      "CipherSign on Flare Confidential Compute. Policies (allowlist, cap, expiry) are enforced inside the enclave — not in a public contract.",
+    icon: Split,
+    title: "Sliced execution",
+    body: "Fill a large order as a series of small private transactions. Each slice is capped and paced by the plan, which breaks the amount correlation a single swap would leak.",
   },
   {
-    icon: Eye,
-    title: "Sealed Until Fill",
-    description:
-      "tokenOut / minOut stay ciphertext until TEE attestation. Settlement routes through Uniswap — amounts become public only at fill.",
+    icon: ShieldCheck,
+    title: "Safe to delegate",
+    body: "Whoever assembles the fill can only ever execute inside the committed terms — wrong price, too big, too soon or too late all revert. Output lands in your private note.",
   },
   {
-    icon: ArrowLeftRight,
-    title: "Onchain Settlement",
-    description:
-      "Uniswap V3–style pools on Coston2 settle trades and liquidity. The DEX stays composable; TEE protects sealed intents and operator keys.",
+    icon: Clock,
+    title: "Real liquidity",
+    body: "Fills route through Ekubo on Starknet mainnet, inside one atomic private transaction. No wrapped venue, no bespoke AMM, no fragmented liquidity.",
   },
-];
-
-const floaters = [
-  { top: "4%", left: "2%", size: 180, rotate: -14, opacity: 0.16, delay: 0 },
-  { top: "12%", right: "2%", size: 260, rotate: 16, opacity: 0.2, delay: 0.4 },
-  { top: "48%", left: "0%", size: 160, rotate: 10, opacity: 0.12, delay: 0.8 },
-  { top: "62%", right: "1%", size: 220, rotate: -18, opacity: 0.15, delay: 1.1 },
-  { top: "32%", left: "38%", size: 120, rotate: 6, opacity: 0.08, delay: 0.2 },
 ];
 
 export default function Home() {
-  const { isConnected, connect } = useWallet();
+  const { isConnected } = useWallet();
 
   return (
-    <div className="relative bg-black text-white overflow-hidden">
-      <div className="pointer-events-none absolute inset-0 overflow-hidden">
-        <div className="absolute -top-40 left-1/2 -translate-x-1/2 w-[900px] h-[700px] rounded-full bg-[#b8ff30]/[0.07] blur-[160px]" />
-        <div className="absolute top-[55%] -right-40 w-[600px] h-[600px] rounded-full bg-white/[0.03] blur-[120px]" />
-        {floaters.map((f, i) => (
-          <motion.div
-            key={i}
-            className="absolute"
-            style={{
-              top: f.top,
-              left: "left" in f ? f.left : undefined,
-              right: "right" in f ? f.right : undefined,
-              opacity: f.opacity,
-              rotate: f.rotate,
-            }}
-            animate={{ y: [0, -22, 0] }}
-            transition={{
-              duration: 5.5 + i,
-              repeat: Infinity,
-              ease: "easeInOut",
-              delay: f.delay,
-            }}
-          >
-            <Image
-              src="/ghost.png"
-              alt=""
-              width={f.size}
-              height={f.size}
-              className="select-none"
-              aria-hidden
-            />
-          </motion.div>
-        ))}
-      </div>
+    <div className="relative overflow-hidden">
+      <Image
+        src="/ghost.png"
+        alt=""
+        width={420}
+        height={420}
+        className="pointer-events-none absolute -right-24 top-24 opacity-[0.07] rotate-12 hidden sm:block"
+        aria-hidden
+      />
+      <Image
+        src="/ghost.png"
+        alt=""
+        width={280}
+        height={280}
+        className="pointer-events-none absolute -left-20 top-[520px] opacity-[0.06] -rotate-12 hidden lg:block"
+        aria-hidden
+      />
 
-      <section className="relative max-w-[1200px] mx-auto px-4 sm:px-6 pt-16 sm:pt-20 pb-20">
-        <motion.div
-          initial={{ opacity: 0, y: 20, scale: 0.88 }}
-          animate={{ opacity: 1, y: 0, scale: 1 }}
-          transition={{ duration: 0.6 }}
-          className="flex justify-center mb-6 sm:mb-8"
-        >
-          <GhostLogo
-            size={320}
-            priority
-            className="w-[200px] h-[200px] sm:w-[280px] sm:h-[280px] md:w-[340px] md:h-[340px] drop-shadow-[0_0_48px_rgba(184,255,48,0.4)]"
-          />
-        </motion.div>
+      <section className="relative px-4 pt-20 sm:pt-28 pb-16 max-w-5xl mx-auto text-center">
+        <motion.div initial={{ opacity: 0, y: 14 }} animate={{ opacity: 1, y: 0 }}>
+          <GhostLogo size={72} priority className="w-16 h-16 sm:w-[72px] sm:h-[72px] mx-auto mb-6" />
 
-        <motion.div
-          initial={{ opacity: 0, y: 20 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.5, delay: 0.1 }}
-          className="text-center max-w-[720px] mx-auto"
-        >
-          <p className="text-sm sm:text-base font-semibold tracking-[0.22em] uppercase text-[#b8ff30] mb-4">
-            GhostBook
+          <p className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-surface border border-border text-[11px] text-text-secondary mb-5">
+            <span className="w-1.5 h-1.5 rounded-full bg-primary" />
+            STRK20 · Starknet mainnet
           </p>
-          <h1 className="text-[clamp(2.5rem,6.5vw,4.75rem)] font-bold leading-[1.05] tracking-tight mb-5">
-            Confidential trading with{" "}
-            <span className="text-[#b8ff30]">Flare TEEs</span>
+
+          <h1 className="text-4xl sm:text-6xl font-semibold tracking-tight leading-[1.05]">
+            Private limit orders
+            <br />
+            that keep their word
           </h1>
-          <p className="text-lg sm:text-xl text-zinc-300 max-w-[560px] mx-auto mb-10 leading-relaxed">
-            Sensitive order and payout logic runs inside a Trusted Execution Environment.
-            Verified outputs connect back to onchain settlement on Coston2.
+
+          <p className="mt-5 text-[15px] sm:text-lg text-text-secondary max-w-2xl mx-auto leading-relaxed">
+            GhostBook turns a resting order into terms enforced by a Cairo contract: commit a limit
+            price and a schedule once, then fill it slice by slice through Ekubo — each fill a single
+            private transaction settling into STRK20 notes.
           </p>
-            <div className="w-full max-w-xs sm:max-w-none sm:w-auto flex flex-col sm:flex-row items-stretch sm:items-center justify-center gap-3">
-              {isConnected ? (
-                <Link
-                  href="/privacy"
-                  className="inline-flex items-center justify-center gap-2 px-7 py-3.5 rounded-2xl text-base font-semibold bg-white text-black hover:bg-white/90 transition-colors"
-                >
-                  TEE Swap <ArrowRight className="w-4 h-4" />
-                </Link>
-              ) : (
-                <button
-                  onClick={connect}
-                  className="inline-flex items-center justify-center gap-2 px-7 py-3.5 rounded-2xl text-base font-semibold bg-white text-black hover:bg-white/90 transition-colors"
-                >
-                  Get Started <ArrowRight className="w-4 h-4" />
-                </button>
-              )}
-            
-              <Link
-                href="/orders"
-                className="inline-flex items-center justify-center gap-2 px-7 py-3.5 rounded-2xl text-base font-medium bg-black border border-white/20 text-white hover:bg-white/5 transition-colors"
-              >
-                TEE Orders
-              </Link>
-            </div>
-        </motion.div>
-      </section>
 
-      <section className="relative max-w-[1200px] mx-auto px-4 sm:px-6 pb-24">
-        <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-4">
-          {features.map((f, i) => {
-            const Icon = f.icon;
-            return (
-              <motion.div
-                key={f.title}
-                initial={{ opacity: 0, y: 16 }}
-                whileInView={{ opacity: 1, y: 0 }}
-                viewport={{ once: true }}
-                transition={{ delay: i * 0.08 }}
-                className="relative p-6 rounded-2xl bg-white/[0.04] border border-white/10 hover:border-[#b8ff30]/40 transition-colors group overflow-hidden"
-              >
-                {i % 2 === 0 && (
-                  <Image
-                    src="/ghost.png"
-                    alt=""
-                    width={120}
-                    height={120}
-                    className="pointer-events-none absolute -right-3 -bottom-4 opacity-[0.1] rotate-12 group-hover:opacity-[0.18] transition-opacity"
-                    aria-hidden
-                  />
-                )}
-                <div className="w-10 h-10 rounded-xl bg-white/10 flex items-center justify-center mb-4">
-                  <Icon className="w-5 h-5 text-white" />
-                </div>
-                <h3 className="text-[15px] font-semibold mb-1.5 group-hover:text-white transition-colors">
-                  {f.title}
-                </h3>
-                <p className="text-sm text-zinc-300 leading-relaxed">{f.description}</p>
-              </motion.div>
-            );
-          })}
-        </div>
-      </section>
-
-      <section className="relative max-w-[1200px] mx-auto px-4 sm:px-6 pb-24">
-        <div className="text-center mb-12">
-          <GhostLogo size={96} className="w-20 h-20 sm:w-24 sm:h-24 mx-auto mb-5 opacity-90" />
-          <h2 className="text-2xl sm:text-3xl font-bold mb-3">How TEE + onchain fit together</h2>
-          <p className="text-zinc-300 max-w-xl mx-auto">
-            Private execution where it matters — settlement where it must be public.
-          </p>
-        </div>
-        <div className="grid sm:grid-cols-3 gap-6 max-w-[900px] mx-auto">
-          {[
-            {
-              n: "1",
-              title: "Private in the TEE",
-              desc: "CipherSign enforces allowlist, amount caps, and expiry inside Flare FCC. Sealed order details stay hidden until reveal.",
-              icon: Lock,
-            },
-            {
-              n: "2",
-              title: "Verified output",
-              desc: "The enclave returns an attested signature or policy decision — not your raw private key or unconstrained signing power.",
-              icon: Shield,
-            },
-            {
-              n: "3",
-              title: "Consumed onchain",
-              desc: "Swaps and LP settle on Uniswap V3–style pools on Coston2. TEE outputs unlock operator payouts and confidential workflows.",
-              icon: Zap,
-            },
-          ].map((s, i) => {
-            const Icon = s.icon;
-            return (
-              <motion.div
-                key={s.n}
-                initial={{ opacity: 0, y: 16 }}
-                whileInView={{ opacity: 1, y: 0 }}
-                viewport={{ once: true }}
-                transition={{ delay: i * 0.1 }}
-                className="text-center p-6"
-              >
-                <div className="w-12 h-12 rounded-2xl bg-black border border-white/10 flex items-center justify-center mx-auto mb-4">
-                  <Icon className="w-5 h-5 text-[#b8ff30]" />
-                </div>
-                <div className="text-xs font-bold text-zinc-400 uppercase tracking-wider mb-2">
-                  Step {s.n}
-                </div>
-                <h3 className="text-lg font-semibold mb-2">{s.title}</h3>
-                <p className="text-sm text-zinc-300 leading-relaxed">{s.desc}</p>
-              </motion.div>
-            );
-          })}
-        </div>
-      </section>
-
-      <section className="relative max-w-[900px] mx-auto px-4 sm:px-6 pb-24">
-        <motion.div
-          initial={{ opacity: 0, y: 16 }}
-          whileInView={{ opacity: 1, y: 0 }}
-          viewport={{ once: true }}
-          className="rounded-3xl bg-white/[0.04] border border-white/10 p-8 sm:p-10"
-        >
-          <div className="flex items-center gap-3 mb-4">
-            <BookOpen className="w-5 h-5 text-[#b8ff30]" />
-            <h2 className="text-xl sm:text-2xl font-bold">Why confidential compute</h2>
-          </div>
-          <div className="space-y-4 text-sm sm:text-base text-zinc-300 leading-relaxed">
-            <p>
-              <span className="text-foreground font-medium">Inside the TEE:</span> policy checks
-              and signing keys for operator payouts (CipherSign), plus sealed order intent handling
-              so price and size are not broadcast by default.
-            </p>
-            <p>
-              <span className="text-foreground font-medium">Onchain:</span> pool state, swaps, and
-              liquidity remain public and composable on Coston2 — where settlement and auditability
-              belong.
-            </p>
-            <p>
-              <span className="text-foreground font-medium">Trust assumptions:</span> you trust
-              Flare FCC hardware attestation and the CipherSign enclave code path — not a
-              centralized hot wallet that can sign anything. That is why TEE beats plain smart
-              contracts for secrets that must never live in public calldata.
-            </p>
-          </div>
-          <div className="mt-6 flex flex-wrap gap-3">
-            <Link
-              href="/vault"
-              className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl text-sm font-semibold bg-[#b8ff30] text-black hover:bg-[#b8ff30]/90 transition-colors"
-            >
-              Explore Vault
-            </Link>
+          <div className="mt-8 flex flex-wrap items-center justify-center gap-3">
             <Link
               href="/orders"
-              className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl text-sm font-medium border border-white/20 hover:bg-white/5 transition-colors"
+              className="inline-flex items-center gap-2 px-5 py-3 rounded-xl bg-primary hover:bg-primary-hover text-white font-semibold transition-colors"
             >
-              Explore Orders
+              Open orders <ArrowRight className="w-4 h-4" />
             </Link>
+            <Link
+              href="/private"
+              className="inline-flex items-center gap-2 px-5 py-3 rounded-xl bg-surface border border-border hover:bg-surface-2 font-semibold transition-colors"
+            >
+              Shield a balance
+            </Link>
+            {!isConnected ? <ConnectButton /> : null}
           </div>
         </motion.div>
       </section>
 
-      <section className="relative max-w-[1200px] mx-auto px-4 sm:px-6 pb-24">
-        <div className="relative rounded-3xl bg-white text-black border border-white/20 p-10 sm:p-16 text-center overflow-hidden">
-          <Image
-            src="/ghost.png"
-            alt=""
-            width={280}
-            height={280}
-            className="pointer-events-none absolute -left-10 -bottom-12 opacity-[0.14] -rotate-12"
-            aria-hidden
-          />
-          <Image
-            src="/ghost.png"
-            alt=""
-            width={220}
-            height={220}
-            className="pointer-events-none absolute -right-8 top-0 opacity-[0.12] rotate-16"
-            aria-hidden
-          />
-          <GhostLogo size={120} className="w-24 h-24 sm:w-28 sm:h-28 mx-auto mb-6 relative" />
-          <h2 className="text-2xl sm:text-3xl font-bold mb-3 relative">Ready to try GhostBook?</h2>
-          <p className="text-zinc-700 mb-8 max-w-md mx-auto relative">
-            Connect on Flare Coston2 — seal orders, settle on the DEX, and gate payouts with TEE policy.
+      <section className="relative px-4 pb-20 max-w-5xl mx-auto">
+        <div className="grid sm:grid-cols-2 gap-3">
+          {FEATURES.map(({ icon: Icon, title, body }, index) => (
+            <motion.div
+              key={title}
+              initial={{ opacity: 0, y: 12 }}
+              whileInView={{ opacity: 1, y: 0 }}
+              viewport={{ once: true }}
+              transition={{ delay: index * 0.06 }}
+              className="rounded-2xl bg-surface border border-border p-5"
+            >
+              <Icon className="w-5 h-5 text-primary mb-3" />
+              <h2 className="text-[15px] font-semibold">{title}</h2>
+              <p className="mt-2 text-[13px] leading-relaxed text-text-secondary">{body}</p>
+            </motion.div>
+          ))}
+        </div>
+      </section>
+
+      <section className="relative px-4 pb-20 max-w-3xl mx-auto">
+        <div className="rounded-2xl bg-surface border border-border p-5 sm:p-6">
+          <h2 className="text-sm font-semibold flex items-center gap-2">
+            <Eye className="w-4 h-4 text-primary" /> What is and isn&apos;t private
+          </h2>
+          <div className="mt-4 grid sm:grid-cols-2 gap-4 text-[12px] leading-relaxed">
+            <div>
+              <p className="text-text-secondary uppercase tracking-wide text-[10px] mb-1.5">
+                Private
+              </p>
+              <ul className="space-y-1.5">
+                <li>Who is trading — the pool is the swap counterparty, not you</li>
+                <li>Note-to-note transfers: no amount, no parties</li>
+                <li>Which deposit a withdrawal came from</li>
+                <li>The parent order&apos;s limit price and schedule</li>
+              </ul>
+            </div>
+            <div>
+              <p className="text-text-secondary uppercase tracking-wide text-[10px] mb-1.5">
+                Public
+              </p>
+              <ul className="space-y-1.5">
+                <li>Deposits: your address, the token and the amount</li>
+                <li>Withdrawal destination and amount</li>
+                <li>Each slice&apos;s swap amounts and timing on Ekubo</li>
+              </ul>
+            </div>
+          </div>
+          <p className="mt-4 text-[11px] text-text-tertiary">
+            GhostBook claims identity privacy, not amount privacy. A distinctive amount executed
+            shortly after a distinctive deposit is still correlatable.
           </p>
-          {isConnected ? (
-            <Link
-              href="/vault"
-              className="relative inline-flex items-center gap-2 px-7 py-3.5 rounded-2xl text-base font-semibold bg-black text-white hover:bg-black/90 transition-colors"
-            >
-              Open TEE Vault <ArrowRight className="w-4 h-4" />
-            </Link>
+        </div>
+      </section>
+
+      <section className="relative px-4 pb-24 max-w-3xl mx-auto">
+        <h2 className="text-sm font-semibold mb-3">Mainnet contracts</h2>
+        <div className="rounded-2xl bg-surface border border-border divide-y divide-border text-[12px]">
+          <Row label="STRK20 privacy pool" address={MAINNET.privacyPool} />
+          <Row label="Ekubo router" address={MAINNET.ekuboRouter} />
+          {MAINNET.anonymizer ? (
+            <Row label="GhostBook anonymizer" address={MAINNET.anonymizer} />
           ) : (
-            <button
-              onClick={connect}
-              className="relative inline-flex items-center gap-2 px-7 py-3.5 rounded-2xl text-base font-semibold bg-black text-white hover:bg-black/90 transition-colors"
-            >
-              Connect Wallet <ArrowRight className="w-4 h-4" />
-            </button>
+            <div className="px-4 py-3 flex items-center justify-between gap-3">
+              <span className="text-text-secondary">GhostBook anonymizer</span>
+              <span className="text-warning">not deployed yet</span>
+            </div>
           )}
         </div>
       </section>
+    </div>
+  );
+}
 
-      <footer className="border-t border-white/10 py-8">
-        <div className="max-w-[1200px] mx-auto px-4 sm:px-6 flex flex-col sm:flex-row items-center justify-between gap-4">
-          <div className="flex items-center gap-2.5 text-zinc-400 text-sm">
-            <GhostLogo size={28} className="w-7 h-7" alt="" /> GhostBook · Flare TEE
-          </div>
-          <div className="flex items-center gap-6 text-sm text-zinc-400">
-            <a
-              href="https://dev.flare.network"
-              target="_blank"
-              rel="noopener noreferrer"
-              className="hover:text-white transition-colors"
-            >
-              Flare Docs
-            </a>
-            <a
-              href="https://faucet.flare.network/coston2"
-              target="_blank"
-              rel="noopener noreferrer"
-              className="hover:text-white transition-colors"
-            >
-              Faucet
-            </a>
-            <a
-              href="https://coston2-explorer.flare.network"
-              target="_blank"
-              rel="noopener noreferrer"
-              className="hover:text-white transition-colors"
-            >
-              Explorer
-            </a>
-          </div>
-        </div>
-      </footer>
+function Row({ label, address }: { label: string; address: string }) {
+  return (
+    <div className="px-4 py-3 flex items-center justify-between gap-3">
+      <span className="text-text-secondary shrink-0">{label}</span>
+      <a
+        href={explorerContractUrl(MAINNET, address)}
+        target="_blank"
+        rel="noreferrer"
+        className="font-mono text-primary hover:underline truncate"
+      >
+        {address}
+      </a>
     </div>
   );
 }

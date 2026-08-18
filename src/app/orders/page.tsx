@@ -1,616 +1,569 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
-import { motion, AnimatePresence } from "framer-motion";
-import { Lock, Eye, EyeOff, Loader2, X, ExternalLink, Shield } from "lucide-react";
-import { useWallet } from "@/context/WalletContext";
-import TokenIcon, { getTokenEmoji } from "@/components/TokenIcon";
+/**
+ * Orders — private limit orders and private TWAP/DCA.
+ *
+ * A plan commits the terms once (limit price, slice size, pacing, budget, expiry). Each fill is one
+ * private transaction: withdraw a slice to the anonymizer, open a note for the output, invoke the
+ * anonymizer. The contract enforces the terms, so a fill can never deviate from what was committed —
+ * and progress is read back from on-chain state keyed by the salted plan hash.
+ *
+ * Plan terms live in this browser: the contract stores only the hash, so export them if you care
+ * about filling the rest of an order later.
+ */
+
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { Clock, Download, Plus, RefreshCw, Trash2, Zap } from "lucide-react";
 import GhostPageShell from "@/components/GhostPageShell";
-import { getExplorerTxUrl } from "@/lib/constants";
-import { UNISWAP_TOKENS, type UniswapToken } from "@/lib/uniswapConfig";
+import GhostLoader from "@/components/GhostLoader";
+import TokenIcon from "@/components/TokenIcon";
+import ConnectButton from "@/components/wallet/ConnectButton";
+import { useWallet } from "@/context/WalletContext";
 import { useToast } from "@/context/ToastContext";
-import { formatAmount } from "@/lib/format";
-import { friendlyError } from "@/lib/errors";
+import { explorerTxUrl, TOKENS, tokenByAddress, type TokenInfo } from "@/lib/starknet/config";
+import { providerFor } from "@/lib/starknet/config";
+import { findBestPool, type Quote } from "@/lib/starknet/quote";
 import {
-  cancelTeeIntent,
-  executeTeeTrade,
-  settleTeeIntent,
-} from "@/lib/privacy/trade";
+  buildPlan,
+  bpsFromFee,
+  fromSmallestUnit,
+  limitPriceOf,
+  planHash,
+  requiredOut,
+  toSmallestUnit,
+  tokenOutOf,
+  type OrderPlan,
+} from "@/lib/strk20/plan";
+import { fillSliceActions } from "@/lib/strk20/actions";
+import {
+  EMPTY_PLAN_STATE,
+  parseSliceFilled,
+  planProgress,
+  readPlanState,
+  type PlanState,
+} from "@/lib/strk20/anonymizer";
+import { exportPlans, plansWithTerms, removePlan, savePlan } from "@/lib/strk20/store";
+import { useStrk20Submit } from "@/lib/strk20/useStrk20Submit";
 
-const FEE = 3000;
-const STORAGE_KEY = "ghostbook.orders.v2";
+type PlanRow = {
+  hash: string;
+  label: string;
+  createdAt: number;
+  plan: OrderPlan;
+  tokenIn: TokenInfo;
+  tokenOut: TokenInfo;
+  state: PlanState;
+};
 
-/** Common pairs shown in the orders UI */
-const PAIR_PRESETS: [UniswapToken, UniswapToken][] = [
-  [UNISWAP_TOKENS[0], UNISWAP_TOKENS[1]], // GHOST/BOOK
-  [
-    UNISWAP_TOKENS.find((t) => t.key === "fxrp")!,
-    UNISWAP_TOKENS.find((t) => t.key === "usdt0")!,
-  ], // FXRP/USDT0
-];
+const FALLBACK_TOKEN: TokenInfo = TOKENS[0];
 
-type OrderType = "limit" | "market";
-type Side = "BUY" | "SELL";
-
-interface Order {
-  id: string;
-  type: OrderType;
-  side: Side;
-  pair: string;
-  baseSymbol: string;
-  quoteSymbol: string;
-  price: string;
-  amount: string;
-  status: "active" | "matched" | "cancelled";
-  time: string;
-  revealed: boolean;
-  txHash?: string;
-  /** PrivacyRouter intent id (TEE escrow) */
-  intentId?: string;
+function tokenOr(address: string): TokenInfo {
+  return tokenByAddress(address) ?? { ...FALLBACK_TOKEN, symbol: "?", address, decimals: 18 };
 }
 
-function loadOrders(address?: string | null): Order[] {
-  if (typeof window === "undefined" || !address) return [];
-  try {
-    const raw = localStorage.getItem(`${STORAGE_KEY}:${address.toLowerCase()}`);
-    return raw ? (JSON.parse(raw) as Order[]) : [];
-  } catch {
-    return [];
-  }
-}
-
-function saveOrders(address: string, orders: Order[]) {
-  localStorage.setItem(`${STORAGE_KEY}:${address.toLowerCase()}`, JSON.stringify(orders));
+function secondsToLabel(seconds: number): string {
+  if (seconds <= 0) return "now";
+  if (seconds < 60) return `${seconds}s`;
+  if (seconds < 3600) return `${Math.ceil(seconds / 60)}m`;
+  return `${Math.ceil(seconds / 3600)}h`;
 }
 
 export default function OrdersPage() {
-  const { isConnected, connect, address } = useWallet();
-  const { showSuccess, showError } = useToast();
+  const { isConnected, address, network, isSupportedNetwork } = useWallet();
+  const { showSuccess, showError, showInfo } = useToast();
+  const { submit, isBusy, status, txHash } = useStrk20Submit();
 
-  const [orderType, setOrderType] = useState<OrderType>("limit");
-  const [side, setSide] = useState<Side>("BUY");
-  const [base, setBase] = useState<UniswapToken>(PAIR_PRESETS[0][0]);
-  const [quote, setQuote] = useState<UniswapToken>(PAIR_PRESETS[0][1]);
-  const [price, setPrice] = useState("");
-  const [amount, setAmount] = useState("");
-  const [isPlacing, setIsPlacing] = useState(false);
-  const [tab, setTab] = useState<"all" | "active" | "matched">("all");
-  const [txHash, setTxHash] = useState<string | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [orders, setOrders] = useState<Order[]>([]);
+  const [sellSymbol, setSellSymbol] = useState("STRK");
+  const [buySymbol, setBuySymbol] = useState("ETH");
+  const [total, setTotal] = useState("10");
+  const [slice, setSlice] = useState("2");
+  const [intervalMinutes, setIntervalMinutes] = useState("15");
+  const [expiryHours, setExpiryHours] = useState("24");
+  const [limitPrice, setLimitPrice] = useState("");
+  const [quote, setQuote] = useState<Quote | null>(null);
+  const [quoting, setQuoting] = useState(false);
+  const [rows, setRows] = useState<PlanRow[]>([]);
+  const [refreshing, setRefreshing] = useState(false);
+  const [fillingHash, setFillingHash] = useState<string | null>(null);
 
-  const pair = `${base.symbol}/${quote.symbol}`;
-  const tokenIn = side === "SELL" ? base : quote;
-  const tokenOut = side === "SELL" ? quote : base;
+  const sellToken = useMemo(() => TOKENS.find((t) => t.symbol === sellSymbol) ?? TOKENS[0], [sellSymbol]);
+  const buyToken = useMemo(
+    () => TOKENS.find((t) => t.symbol === buySymbol) ?? TOKENS[1],
+    [buySymbol],
+  );
+  const anonymizer = network.anonymizer;
+  const deployed = Boolean(anonymizer);
 
-  useEffect(() => {
-    setOrders(loadOrders(address));
-  }, [address]);
-
-  useEffect(() => {
-    if (address) saveOrders(address, orders);
-  }, [orders, address]);
-
-  const amountInLabel = useMemo(() => {
-    if (orderType === "market") {
-      return side === "SELL" ? `Amount (${base.symbol})` : `Amount (${quote.symbol})`;
-    }
-    return `Amount (${base.symbol})`;
-  }, [orderType, side, base.symbol, quote.symbol]);
-
-  const canSubmit = useMemo(() => {
-    if (!amount || Number(amount) <= 0) return false;
-    if (orderType === "limit" && (!price || Number(price) <= 0)) return false;
-    return true;
-  }, [amount, price, orderType]);
-
-  const totalDisplay = useMemo(() => {
-    if (orderType === "limit" && price && amount) {
-      const t = parseFloat(price) * parseFloat(amount);
-      if (!Number.isFinite(t)) return null;
-      return `${formatAmount(t)} ${quote.symbol}`;
-    }
-    return null;
-  }, [orderType, price, amount, quote.symbol]);
-
-  const handlePlaceOrder = async () => {
-    if (!canSubmit || !isConnected || !address) {
-      if (!isConnected) connect();
+  /** Quote the slice through Ekubo so the plan's limit price starts from a real market price. */
+  const refreshQuote = useCallback(async () => {
+    if (sellToken.symbol === buyToken.symbol) {
+      setQuote(null);
       return;
     }
-    setIsPlacing(true);
-    setTxHash(null);
-    setError(null);
+    const sliceAmount = Number(slice);
+    if (!Number.isFinite(sliceAmount) || sliceAmount <= 0) {
+      setQuote(null);
+      return;
+    }
+    setQuoting(true);
     try {
-      // Market: amount is tokenIn. Limit BUY: amount is base to buy → pay quote = price*amount
-      // Limit SELL: amount is base to sell (tokenIn = base)
-      let amountInHuman = amount;
-      let amountOutMinHuman: string | undefined;
-
-      if (orderType === "limit") {
-        if (side === "BUY") {
-          // Pay quote, receive base. Escrow quote amount = price * amount
-          const pay = parseFloat(price) * parseFloat(amount);
-          if (!Number.isFinite(pay) || pay <= 0) throw new Error("Invalid limit total");
-          amountInHuman = String(pay);
-          // minOut = base amount at limit
-          amountOutMinHuman = amount;
-        } else {
-          // Sell base for quote; minOut = price * amount
-          amountInHuman = amount;
-          const receive = parseFloat(price) * parseFloat(amount);
-          if (!Number.isFinite(receive) || receive <= 0) throw new Error("Invalid limit total");
-          amountOutMinHuman = String(receive);
-        }
-      }
-
-      const result = await executeTeeTrade({
-        tokenIn: tokenIn.address,
-        tokenOut: tokenOut.address,
-        amountInHuman,
-        amountOutMinHuman,
-        fee: FEE,
-        recipient: address,
-        mode: orderType === "market" ? "market" : "limit",
-        slippagePct: "0.5",
-      });
-
-      const hash = result.settleTxHash || result.escrowTxHash;
-      setTxHash(hash);
-
-      const next: Order = {
-        id: result.intentId,
-        type: orderType,
-        side,
-        pair,
-        baseSymbol: base.symbol,
-        quoteSymbol: quote.symbol,
-        price: orderType === "market" ? "Market" : price,
-        amount,
-        status: result.status === "matched" ? "matched" : "active",
-        time: "Just now",
-        revealed: orderType === "market",
-        txHash: hash,
-        intentId: result.intentId,
-      };
-      setOrders((prev) => [next, ...prev]);
-      showSuccess(
-        orderType === "market"
-          ? `TEE market ${side.toLowerCase()} settled · #${result.intentId}`
-          : `TEE limit escrowed · intent #${result.intentId}`
+      const best = await findBestPool(
+        providerFor(network),
+        network.ekuboRouter,
+        sellToken.address,
+        buyToken.address,
+        toSmallestUnit(sliceAmount, sellToken.decimals),
+        sellToken.decimals,
+        buyToken.decimals,
       );
-      setAmount("");
-      setPrice("");
-    } catch (err: unknown) {
-      const msg = friendlyError(err, "Failed to place TEE order.");
-      setError(msg);
-      showError(msg);
+      setQuote(best);
+      if (best && !limitPrice) setLimitPrice(String(Number(best.price.toPrecision(6))));
     } finally {
-      setIsPlacing(false);
+      setQuoting(false);
     }
-  };
+  }, [network, sellToken, buyToken, slice, limitPrice]);
 
-  const cancelOrder = async (id: string) => {
-    const order = orders.find((o) => o.id === id);
-    try {
-      if (order?.intentId && order.status === "active") {
-        const hash = await cancelTeeIntent(order.intentId);
-        setTxHash(hash);
-      }
-      setOrders((prev) =>
-        prev.map((o) => (o.id === id ? { ...o, status: "cancelled" as const } : o))
-      );
-      showSuccess("TEE order cancelled · escrow returned");
-    } catch (err: unknown) {
-      showError(friendlyError(err, "Cancel failed"));
+  useEffect(() => {
+    void refreshQuote();
+    // Re-quote when the pair or slice changes, not on every limit-price keystroke.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [network.key, sellToken.address, buyToken.address, slice]);
+
+  const loadRows = useCallback(async () => {
+    if (!address) {
+      setRows([]);
+      return;
     }
-  };
-
-  const fillLimit = async (id: string) => {
-    const order = orders.find((o) => o.id === id);
-    if (!order?.intentId) return;
-    setIsPlacing(true);
+    setRefreshing(true);
     try {
-      const { settleTxHash } = await settleTeeIntent(order.intentId);
-      setTxHash(settleTxHash);
-      setOrders((prev) =>
-        prev.map((o) =>
-          o.id === id
-            ? {
-                ...o,
-                status: "matched" as const,
-                revealed: true,
-                txHash: settleTxHash,
-              }
-            : o
-        )
+      const stored = plansWithTerms(network.key, address);
+      const provider = providerFor(network);
+      const next = await Promise.all(
+        stored.map(async ({ stored: meta, plan }) => {
+          let state = EMPTY_PLAN_STATE;
+          if (deployed) {
+            try {
+              state = await readPlanState(provider, anonymizer, plan);
+            } catch {
+              /* unreachable node or fresh plan — treat as empty */
+            }
+          }
+          return {
+            hash: meta.hash,
+            label: meta.label,
+            createdAt: meta.createdAt,
+            plan,
+            tokenIn: tokenOr(plan.tokenIn),
+            tokenOut: tokenOr(tokenOutOf(plan)),
+            state,
+          } satisfies PlanRow;
+        }),
       );
-      showSuccess(`TEE filled intent #${order.intentId}`);
-    } catch (err: unknown) {
-      showError(friendlyError(err, "TEE fill failed — limit may be unmet"));
+      setRows(next);
     } finally {
-      setIsPlacing(false);
+      setRefreshing(false);
     }
+  }, [address, network, anonymizer, deployed]);
+
+  useEffect(() => {
+    void loadRows();
+  }, [loadRows]);
+
+  const createPlan = () => {
+    if (!address) return;
+    if (sellToken.symbol === buyToken.symbol) {
+      showError("Pick two different tokens.");
+      return;
+    }
+    if (!quote) {
+      showError("No Ekubo pool priced this pair — try a different pair or slice size.");
+      return;
+    }
+    const price = Number(limitPrice);
+    if (!Number.isFinite(price) || price <= 0) {
+      showError("Set a limit price.");
+      return;
+    }
+    const totalAmount = Number(total);
+    const sliceAmount = Number(slice);
+    if (!(totalAmount > 0) || !(sliceAmount > 0) || sliceAmount > totalAmount) {
+      showError("Slice must be greater than zero and no larger than the total.");
+      return;
+    }
+
+    const plan = buildPlan({
+      tokenIn: sellToken.address,
+      tokenOut: buyToken.address,
+      decimalsIn: sellToken.decimals,
+      decimalsOut: buyToken.decimals,
+      poolKey: quote.poolKey,
+      totalAmount,
+      sliceAmount,
+      intervalMinutes: Number(intervalMinutes) || 0,
+      expiryHours: Number(expiryHours) || 24,
+      limitPrice: price,
+    });
+
+    const label = `${sellToken.symbol} → ${buyToken.symbol} @ ${price}`;
+    savePlan(network.key, address, plan, label);
+    showSuccess("Plan committed locally. Fill a slice when the price is right.");
+    void loadRows();
   };
 
-  const toggleReveal = (id: string) => {
-    setOrders((prev) =>
-      prev.map((o) => (o.id === id ? { ...o, revealed: !o.revealed } : o))
+  const fillSlice = async (row: PlanRow) => {
+    if (!address) return;
+    if (!deployed) {
+      showError("No GhostBook anonymizer configured for this network yet.");
+      return;
+    }
+    const progress = planProgress(row.plan, row.state, Math.floor(Date.now() / 1000));
+    if (progress.expired) {
+      showError("This plan has expired.");
+      return;
+    }
+    if (progress.exhausted) {
+      showError("This plan is fully filled.");
+      return;
+    }
+    const amountIn =
+      progress.remaining < row.plan.maxSlice ? progress.remaining : row.plan.maxSlice;
+
+    setFillingHash(row.hash);
+    showInfo("Confirm in your wallet. The fill reverts unless your limit price is met.");
+    const result = await submit(
+      fillSliceActions({
+        plan: row.plan,
+        anonymizer,
+        ekuboRouter: network.ekuboRouter,
+        amountIn,
+        noteOwner: address,
+      }),
     );
+    setFillingHash(null);
+
+    if (result.status === "success") {
+      const event = parseSliceFilled(result.receipt, anonymizer);
+      if (event) {
+        showSuccess(
+          `Filled ${fromSmallestUnit(event.amountIn, row.tokenIn.decimals)} ${row.tokenIn.symbol} → ${fromSmallestUnit(event.amountOut, row.tokenOut.decimals)} ${row.tokenOut.symbol}`,
+        );
+      } else {
+        showSuccess("Transaction confirmed, but no SliceFilled event was found.");
+      }
+      void loadRows();
+    } else if (result.error) {
+      showError(result.error);
+    }
   };
 
-  const filtered = orders.filter((o) => (tab === "all" ? true : o.status === tab));
+  const deleteRow = (hash: string) => {
+    if (!address) return;
+    removePlan(network.key, address, hash);
+    void loadRows();
+  };
 
-  const primaryLabel = !isConnected
-    ? "Connect Wallet"
-    : isPlacing
-      ? orderType === "market"
-        ? "TEE settling…"
-        : "TEE escrowing…"
-      : !canSubmit
-        ? orderType === "limit"
-          ? "Enter price & amount"
-          : "Enter an amount"
-        : orderType === "market"
-          ? `TEE market ${side.toLowerCase()}`
-          : (
-              <>
-                <Lock className="w-4 h-4" /> TEE sealed {side.toLowerCase()}
-              </>
-            );
+  const download = () => {
+    if (!address) return;
+    const blob = new Blob([exportPlans(network.key, address)], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `ghostbook-plans-${address.slice(0, 8)}.json`;
+    link.click();
+    URL.revokeObjectURL(url);
+  };
+
+  const now = Math.floor(Date.now() / 1000);
 
   return (
     <GhostPageShell
       title="Orders"
-      subtitle={`${pair} · TEE sealed market & limit`}
+      subtitle="Private limit orders and TWAP, enforced on-chain"
       maxWidth="lg"
       headerRight={
-        <div className="px-3 py-1.5 rounded-full text-xs font-semibold border bg-[#b8ff30]/15 text-[#b8ff30] border-[#b8ff30]/30 inline-flex items-center gap-1.5">
-          <Shield className="w-3.5 h-3.5" /> TEE only
-        </div>
+        isConnected ? (
+          <div className="flex items-center gap-2">
+            <button
+              onClick={download}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-surface border border-border text-[12px] hover:bg-surface-2 transition-colors"
+              title="Plan terms only exist in this browser — export them"
+            >
+              <Download className="w-3.5 h-3.5" />
+              Export
+            </button>
+            <button
+              onClick={() => void loadRows()}
+              disabled={refreshing}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-surface border border-border text-[12px] hover:bg-surface-2 disabled:opacity-50 transition-colors"
+            >
+              <RefreshCw className={`w-3.5 h-3.5 ${refreshing ? "animate-spin" : ""}`} />
+              Refresh
+            </button>
+          </div>
+        ) : null
       }
     >
-      <div className="flex flex-col lg:flex-row gap-5">
-        {/* Create order — original sealed UI preserved */}
-        <div className="lg:w-[380px] shrink-0">
-          <div className="rounded-3xl bg-surface border border-border p-5 lg:sticky lg:top-[88px]">
-            <h2 className="text-lg font-semibold mb-4">
-              {orderType === "limit" ? "New sealed order" : "New market order"}
-            </h2>
+      {!deployed ? (
+        <div className="mb-4 rounded-xl border border-warning/30 bg-warning/10 px-4 py-3 text-[12px] text-warning">
+          No anonymizer address configured for {network.label}. Set
+          <span className="font-mono"> NEXT_PUBLIC_ANONYMIZER_MAINNET</span> after deploying
+          <span className="font-mono"> GhostBookAnonymizer</span>.
+        </div>
+      ) : null}
 
-            {/* Order type */}
-            <div className="flex gap-1.5 p-1 rounded-2xl bg-surface-2 mb-3">
-              {([
-                { id: "limit" as const, label: "Limit" },
-                { id: "market" as const, label: "Market" },
-              ]).map((t) => (
+      <div className="rounded-2xl bg-surface border border-border p-4 sm:p-5">
+        <h2 className="text-sm font-semibold mb-3 flex items-center gap-2">
+          <Plus className="w-4 h-4" /> New plan
+        </h2>
+
+        <div className="grid sm:grid-cols-2 gap-3 mb-3">
+          <div>
+            <label className="block text-[11px] uppercase tracking-wide text-text-secondary mb-1.5">
+              Sell
+            </label>
+            <div className="flex gap-1.5">
+              {TOKENS.map((t) => (
                 <button
-                  key={t.id}
-                  onClick={() => {
-                    setOrderType(t.id);
-                    setError(null);
-                  }}
-                  className={`flex-1 py-2 rounded-xl text-sm font-semibold transition-colors ${
-                    orderType === t.id
-                      ? "bg-surface text-foreground border border-border"
-                      : "text-text-secondary hover:text-foreground"
+                  key={t.address}
+                  onClick={() => setSellSymbol(t.symbol)}
+                  className={`flex items-center gap-1.5 px-2.5 py-2 rounded-xl border text-[13px] transition-colors ${
+                    t.symbol === sellSymbol
+                      ? "border-primary bg-primary-soft"
+                      : "border-border bg-surface-2 hover:border-border-hover"
                   }`}
                 >
-                  {t.label}
+                  <TokenIcon symbol={t.symbol} size="sm" />
+                  {t.symbol}
                 </button>
               ))}
             </div>
-
-            {/* Side */}
-            <div className="flex gap-1.5 p-1 rounded-2xl bg-surface-2 mb-4">
-              {(["BUY", "SELL"] as const).map((s) => (
+          </div>
+          <div>
+            <label className="block text-[11px] uppercase tracking-wide text-text-secondary mb-1.5">
+              Buy
+            </label>
+            <div className="flex gap-1.5">
+              {TOKENS.map((t) => (
                 <button
-                  key={s}
-                  onClick={() => setSide(s)}
-                  className={`flex-1 py-2.5 rounded-xl text-sm font-semibold transition-colors ${
-                    side === s
-                      ? s === "BUY"
-                        ? "bg-success text-white"
-                        : "bg-danger text-white"
-                      : "text-text-secondary hover:text-foreground"
+                  key={t.address}
+                  onClick={() => setBuySymbol(t.symbol)}
+                  className={`flex items-center gap-1.5 px-2.5 py-2 rounded-xl border text-[13px] transition-colors ${
+                    t.symbol === buySymbol
+                      ? "border-primary bg-primary-soft"
+                      : "border-border bg-surface-2 hover:border-border-hover"
                   }`}
                 >
-                  {s}
+                  <TokenIcon symbol={t.symbol} size="sm" />
+                  {t.symbol}
                 </button>
               ))}
             </div>
+          </div>
+        </div>
 
-            {/* Pair display */}
-            <div className="mb-4 space-y-2">
-              <div className="flex gap-1.5 p-1 rounded-2xl bg-surface-2">
-                {PAIR_PRESETS.map(([b, q]) => {
-                  const active = base.address === b.address && quote.address === q.address;
-                  return (
-                    <button
-                      key={`${b.symbol}-${q.symbol}`}
-                      type="button"
-                      onClick={() => {
-                        setBase(b);
-                        setQuote(q);
-                      }}
-                      className={`flex-1 py-2 rounded-xl text-xs font-semibold transition-colors ${
-                          active
-                            ? "bg-surface text-foreground border border-border"
-                            : "text-text-secondary hover:text-foreground"
-                        }`}
-                    >
-                      {getTokenEmoji(b.symbol)} {b.symbol}/{getTokenEmoji(q.symbol)} {q.symbol}
-                    </button>
-                  );
-                })}
-              </div>
-              <div className="flex items-center gap-3 p-3 rounded-2xl bg-surface-2">
-                <div className="flex -space-x-2">
-                  <TokenIcon symbol={base.symbol} size="sm" />
-                  <TokenIcon symbol={quote.symbol} size="sm" />
-                </div>
-                <span className="font-semibold text-sm">
-                  {base.symbol} / {quote.symbol}
-                </span>
-              </div>
-            </div>
+        <div className="grid sm:grid-cols-4 gap-3 mb-3">
+          <Field label={`Total (${sellToken.symbol})`} value={total} onChange={setTotal} />
+          <Field label={`Slice (${sellToken.symbol})`} value={slice} onChange={setSlice} />
+          <Field label="Min interval (min)" value={intervalMinutes} onChange={setIntervalMinutes} />
+          <Field label="Expires in (h)" value={expiryHours} onChange={setExpiryHours} />
+        </div>
 
-            {/* Price — limit only (sealed UI) */}
-            {orderType === "limit" && (
-              <div className="mb-3">
-                <div className="flex items-center justify-between text-sm text-text-tertiary mb-1.5">
-                  <span>Price ({quote.symbol})</span>
-                  <span className="flex items-center gap-1">
-                    <Lock className="w-3 h-3 text-primary" /> Sealed
-                  </span>
-                </div>
-                <input
-                  type="number"
-                  inputMode="decimal"
-                  placeholder="0"
-                  value={price}
-                  onChange={(e) => setPrice(e.target.value)}
-                  className="w-full p-3.5 rounded-2xl bg-surface-2 border border-border text-lg font-medium focus:outline-none focus:border-border-hover transition-colors"
-                />
-              </div>
-            )}
-
-            {/* Amount */}
-            <div className="mb-4">
-              <div className="flex items-center justify-between text-sm text-text-tertiary mb-1.5">
-                <span>{amountInLabel}</span>
-                {orderType === "limit" ? (
-                  <span className="flex items-center gap-1">
-                    <Lock className="w-3 h-3 text-primary" /> Sealed
-                  </span>
-                ) : (
-                  <span className="text-primary text-xs font-medium">Market</span>
-                )}
-              </div>
-              <input
-                type="number"
-                inputMode="decimal"
-                placeholder="0"
-                value={amount}
-                onChange={(e) => setAmount(e.target.value)}
-                className="w-full p-3.5 rounded-2xl bg-surface-2 border border-border text-lg font-medium focus:outline-none focus:border-border-hover transition-colors"
-              />
-            </div>
-
-            {/* Total */}
-            {totalDisplay && (
-              <div className="p-3 rounded-xl bg-surface-2 flex justify-between text-sm mb-4">
-                <span className="text-text-secondary">Total</span>
-                <span className="font-mono">{totalDisplay}</span>
-              </div>
-            )}
-
-            {/* Submit */}
-            <button
-              onClick={isConnected ? handlePlaceOrder : connect}
-              disabled={isConnected && (!canSubmit || isPlacing)}
-              className={`w-full py-3.5 rounded-2xl text-[15px] font-semibold transition-colors flex items-center justify-center gap-2 ${
-                !isConnected
-                  ? "bg-primary-soft text-primary hover:bg-primary/20"
-                  : !canSubmit
-                    ? "bg-surface-2 text-text-tertiary cursor-not-allowed"
-                    : side === "BUY"
-                      ? "bg-success hover:bg-success/90 text-white"
-                      : "bg-danger hover:bg-danger/90 text-white"
-              } disabled:opacity-60`}
-            >
-              {isPlacing ? (
-                <>
-                  <Loader2 className="w-4 h-4 animate-spin" />{" "}
-                  {orderType === "market" ? "TEE settling..." : "TEE escrowing..."}
-                </>
-              ) : (
-                primaryLabel
-              )}
+        <div className="mb-3">
+          <label className="block text-[11px] uppercase tracking-wide text-text-secondary mb-1.5">
+            Limit price — minimum {buyToken.symbol} per {sellToken.symbol}
+          </label>
+          <input
+            type="number"
+            min="0"
+            step="any"
+            value={limitPrice}
+            onChange={(event) => setLimitPrice(event.target.value)}
+            placeholder="0.0"
+            className="w-full rounded-xl bg-surface-2 border border-border px-3 py-2.5 text-lg tabular-nums outline-none focus:border-border-hover"
+          />
+          <div className="mt-1.5 flex items-center justify-between text-[11px] text-text-secondary">
+            <span>
+              {quoting
+                ? "Quoting Ekubo…"
+                : quote
+                  ? `Market ${Number(quote.price.toPrecision(6))} ${buyToken.symbol}/${sellToken.symbol} · ${bpsFromFee(quote.poolKey.fee)}bps pool`
+                  : "No Ekubo pool priced this pair"}
+            </span>
+            <button onClick={() => void refreshQuote()} className="text-primary hover:underline">
+              re-quote
             </button>
-
-            {error && (
-              <div className="mt-2 p-2.5 rounded-xl bg-danger/10 text-danger text-xs text-center">
-                {error}
-              </div>
-            )}
-
-            {txHash && (
-              <div className="mt-2 flex items-center justify-center gap-2 text-xs">
-                <span className="text-text-tertiary">Tx:</span>
-                <a
-                  href={getExplorerTxUrl(txHash)}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="text-primary hover:underline flex items-center gap-1 font-mono"
-                >
-                  {txHash.slice(0, 10)}...{txHash.slice(-6)}{" "}
-                  <ExternalLink className="w-3 h-3" />
-                </a>
-              </div>
-            )}
-
-            <p className="text-xs text-text-tertiary mt-3 text-center">
-              {orderType === "limit"
-                ? "Limit stays sealed in TEE escrow until fill or cancel"
-                : "Market: encrypt → escrow → TEE match → settle"}
-            </p>
           </div>
         </div>
 
-        {/* Orders list — original UI */}
-        <div className="flex-1 min-w-0">
-          <div className="flex items-center justify-between mb-4">
-            <div className="flex items-center gap-1 bg-surface rounded-2xl p-1">
-              {(["all", "active", "matched"] as const).map((t) => (
-                <button
-                  key={t}
-                  onClick={() => setTab(t)}
-                  className={`px-3.5 py-1.5 rounded-xl text-sm font-medium capitalize transition-colors ${
-                    tab === t
-                      ? "bg-surface-2 text-foreground"
-                      : "text-text-secondary hover:text-foreground"
-                  }`}
-                >
-                  {t}
-                </button>
-              ))}
-            </div>
-            <span className="text-sm text-text-tertiary">{filtered.length} orders</span>
-          </div>
-
-          <div className="space-y-2">
-            <AnimatePresence>
-              {filtered.map((order) => (
-                <motion.div
-                  key={order.id}
-                  layout
-                  initial={{ opacity: 0, y: 8 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  exit={{ opacity: 0 }}
-                  className={`p-4 rounded-2xl bg-surface border border-border ${
-                    order.status === "cancelled" ? "opacity-40" : ""
-                  }`}
-                >
-                  <div className="flex items-center justify-between mb-3">
-                    <div className="flex items-center gap-2.5 flex-wrap">
-                      <span
-                        className={`px-2.5 py-1 rounded-lg text-xs font-bold ${
-                          order.side === "BUY"
-                            ? "bg-success/12 text-success"
-                            : "bg-danger/12 text-danger"
-                        }`}
-                      >
-                        {order.side}
-                      </span>
-                      <span className="px-2 py-0.5 rounded-lg text-[11px] font-medium bg-surface-2 text-text-secondary capitalize">
-                        {order.type}
-                      </span>
-                      <div className="flex items-center gap-2">
-                        <div className="flex -space-x-1.5">
-                          <TokenIcon symbol={order.baseSymbol} size="sm" />
-                          <TokenIcon symbol={order.quoteSymbol} size="sm" />
-                        </div>
-                        <span className="text-sm font-semibold">{order.pair}</span>
-                      </div>
-                      <span
-                        className={`px-2 py-0.5 rounded-full text-[11px] font-medium ${
-                          order.status === "active"
-                            ? "bg-success/10 text-success"
-                            : order.status === "matched"
-                              ? "bg-primary-soft text-primary"
-                              : "bg-surface-2 text-text-tertiary"
-                        }`}
-                      >
-                        {order.status}
-                      </span>
-                    </div>
-                    <span className="text-xs text-text-tertiary shrink-0">{order.time}</span>
-                  </div>
-
-                  <div className="flex items-center justify-between">
-                    <div className="flex gap-8">
-                      <div>
-                        <div className="text-[11px] text-text-tertiary uppercase tracking-wider mb-0.5">
-                          Price
-                        </div>
-                        {order.type === "market" || order.revealed ? (
-                          <span className="text-sm font-mono">{order.price}</span>
-                        ) : (
-                          <span className="text-sm text-text-tertiary flex items-center gap-1">
-                            <Lock className="w-3 h-3" /> Sealed
-                          </span>
-                        )}
-                      </div>
-                      <div>
-                        <div className="text-[11px] text-text-tertiary uppercase tracking-wider mb-0.5">
-                          Amount
-                        </div>
-                        {order.type === "market" || order.revealed ? (
-                          <span className="text-sm font-mono">{formatAmount(order.amount)}</span>
-                        ) : (
-                          <span className="text-sm text-text-tertiary flex items-center gap-1">
-                            <Lock className="w-3 h-3" /> Sealed
-                          </span>
-                        )}
-                      </div>
-                    </div>
-                    <div className="flex items-center gap-1.5">
-                      {order.status === "active" && order.intentId && (
-                        <button
-                          type="button"
-                          disabled={isPlacing}
-                          onClick={() => fillLimit(order.id)}
-                          className="px-2.5 py-1 rounded-lg text-[11px] font-semibold bg-primary/15 text-primary border border-primary/25 hover:bg-primary hover:text-white transition-colors disabled:opacity-50"
-                        >
-                          TEE fill
-                        </button>
-                      )}
-                      {order.type === "limit" && (
-                        <button
-                          onClick={() => toggleReveal(order.id)}
-                          className="p-1.5 rounded-lg hover:bg-surface-2 transition-colors"
-                        >
-                          {order.revealed ? (
-                            <EyeOff className="w-4 h-4 text-text-tertiary" />
-                          ) : (
-                            <Eye className="w-4 h-4 text-primary" />
-                          )}
-                        </button>
-                      )}
-                      {order.txHash && (
-                        <a
-                          href={getExplorerTxUrl(order.txHash)}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="p-1.5 rounded-lg hover:bg-surface-2 transition-colors"
-                        >
-                          <ExternalLink className="w-4 h-4 text-text-tertiary" />
-                        </a>
-                      )}
-                      {order.status === "active" && (
-                        <button
-                          onClick={() => cancelOrder(order.id)}
-                          className="p-1.5 rounded-lg hover:bg-surface-2 transition-colors"
-                        >
-                          <X className="w-4 h-4 text-text-tertiary hover:text-danger" />
-                        </button>
-                      )}
-                    </div>
-                  </div>
-                </motion.div>
-              ))}
-            </AnimatePresence>
-          </div>
-
-          {filtered.length === 0 && (
-            <div className="text-center py-16 text-text-tertiary">
-              <Lock className="w-10 h-10 mx-auto mb-3 opacity-20" />
-              <p className="text-sm">No {tab === "all" ? "" : tab} orders</p>
-            </div>
-          )}
-        </div>
+        {!isConnected ? (
+          <ConnectButton />
+        ) : !isSupportedNetwork ? (
+          <p className="text-[12px] text-warning">Switch your wallet to Starknet Mainnet.</p>
+        ) : (
+          <button
+            onClick={createPlan}
+            className="w-full py-3 rounded-xl bg-primary hover:bg-primary-hover text-white font-semibold transition-colors"
+          >
+            Commit plan
+          </button>
+        )}
       </div>
+
+      <div className="mt-4 space-y-3">
+        {rows.length === 0 ? (
+          <div className="rounded-2xl bg-surface border border-border p-6 text-center text-[13px] text-text-secondary">
+            No plans yet. A plan is committed in your browser and enforced on-chain when you fill it.
+          </div>
+        ) : (
+          rows.map((row) => {
+            const progress = planProgress(row.plan, row.state, now);
+            const waitFor = Math.max(0, progress.nextFillAt - now);
+            const nextSlice =
+              progress.remaining < row.plan.maxSlice ? progress.remaining : row.plan.maxSlice;
+            const filledPct =
+              Number((row.state.filled * 100n) / (row.plan.totalAmount || 1n)) || 0;
+            const price = limitPriceOf(row.plan, row.tokenIn.decimals, row.tokenOut.decimals);
+            const blocked = progress.expired || progress.exhausted || waitFor > 0;
+
+            return (
+              <div key={row.hash} className="rounded-2xl bg-surface border border-border p-4">
+                <div className="flex items-start justify-between gap-3">
+                  <div className="min-w-0">
+                    <div className="flex items-center gap-2 text-sm font-medium">
+                      <TokenIcon symbol={row.tokenIn.symbol} size="sm" />
+                      {row.tokenIn.symbol}
+                      <span className="text-text-secondary">→</span>
+                      <TokenIcon symbol={row.tokenOut.symbol} size="sm" />
+                      {row.tokenOut.symbol}
+                    </div>
+                    <p className="text-[11px] text-text-secondary mt-1 font-mono truncate">
+                      {row.hash}
+                    </p>
+                  </div>
+                  <button
+                    onClick={() => deleteRow(row.hash)}
+                    className="p-1.5 rounded-lg text-text-secondary hover:text-danger hover:bg-surface-2 transition-colors"
+                    title="Forget this plan (its remaining budget becomes unfillable)"
+                  >
+                    <Trash2 className="w-4 h-4" />
+                  </button>
+                </div>
+
+                <dl className="grid grid-cols-2 sm:grid-cols-4 gap-3 mt-3 text-[12px]">
+                  <Stat label="Limit" value={`${Number(price.toPrecision(6))}`} />
+                  <Stat
+                    label="Filled"
+                    value={`${fromSmallestUnit(row.state.filled, row.tokenIn.decimals)} / ${fromSmallestUnit(row.plan.totalAmount, row.tokenIn.decimals)}`}
+                  />
+                  <Stat
+                    label="Received"
+                    value={`${fromSmallestUnit(row.state.received, row.tokenOut.decimals)} ${row.tokenOut.symbol}`}
+                  />
+                  <Stat label="Fills" value={String(row.state.fills)} />
+                </dl>
+
+                <div className="mt-3 h-1.5 rounded-full bg-surface-2 overflow-hidden">
+                  <div
+                    className="h-full bg-primary transition-all"
+                    style={{ width: `${Math.min(100, filledPct)}%` }}
+                  />
+                </div>
+
+                <div className="mt-3 flex items-center justify-between gap-3">
+                  <p className="text-[11px] text-text-secondary flex items-center gap-1.5">
+                    {progress.expired ? (
+                      "Expired"
+                    ) : progress.exhausted ? (
+                      "Fully filled"
+                    ) : waitFor > 0 ? (
+                      <>
+                        <Clock className="w-3.5 h-3.5" /> next slice in {secondsToLabel(waitFor)}
+                      </>
+                    ) : (
+                      <>
+                        Next slice {fromSmallestUnit(nextSlice, row.tokenIn.decimals)}{" "}
+                        {row.tokenIn.symbol} · needs ≥{" "}
+                        {fromSmallestUnit(requiredOut(row.plan, nextSlice), row.tokenOut.decimals)}{" "}
+                        {row.tokenOut.symbol}
+                      </>
+                    )}
+                  </p>
+                  <button
+                    onClick={() => void fillSlice(row)}
+                    disabled={blocked || isBusy || !deployed}
+                    className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-primary hover:bg-primary-hover disabled:opacity-40 text-white text-[13px] font-semibold transition-colors"
+                  >
+                    {fillingHash === row.hash ? (
+                      <>
+                        <GhostLoader size="sm" />
+                        {status === "signing" ? "Wallet…" : "Proving…"}
+                      </>
+                    ) : (
+                      <>
+                        <Zap className="w-3.5 h-3.5" /> Fill slice
+                      </>
+                    )}
+                  </button>
+                </div>
+              </div>
+            );
+          })
+        )}
+      </div>
+
+      {txHash ? (
+        <a
+          href={explorerTxUrl(network, txHash)}
+          target="_blank"
+          rel="noreferrer"
+          className="mt-4 block text-[12px] text-primary hover:underline font-mono truncate"
+        >
+          {txHash} ↗
+        </a>
+      ) : null}
+
+      <p className="mt-4 text-[11px] leading-relaxed text-text-secondary">
+        Each fill is one private transaction: the pool withdraws a slice to the anonymizer, opens a
+        note for the output, and invokes the contract, which swaps on Ekubo only if your limit price,
+        slice cap, pacing and expiry all hold. The Ekubo leg is a public swap — slice amounts and
+        timing are visible on-chain. What stays private is who is trading and the shape of the parent
+        order. Plan terms, including the salt, live only in this browser.
+      </p>
     </GhostPageShell>
+  );
+}
+
+function Field({
+  label,
+  value,
+  onChange,
+}: {
+  label: string;
+  value: string;
+  onChange: (value: string) => void;
+}) {
+  return (
+    <div>
+      <label className="block text-[11px] uppercase tracking-wide text-text-secondary mb-1.5">
+        {label}
+      </label>
+      <input
+        type="number"
+        min="0"
+        step="any"
+        value={value}
+        onChange={(event) => onChange(event.target.value)}
+        className="w-full rounded-xl bg-surface-2 border border-border px-3 py-2.5 text-sm tabular-nums outline-none focus:border-border-hover"
+      />
+    </div>
+  );
+}
+
+function Stat({ label, value }: { label: string; value: string }) {
+  return (
+    <div>
+      <dt className="text-[10px] uppercase tracking-wide text-text-secondary">{label}</dt>
+      <dd className="mt-0.5 tabular-nums">{value}</dd>
+    </div>
   );
 }

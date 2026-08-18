@@ -7,22 +7,16 @@ import { useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import ConnectButton from "@/components/wallet/ConnectButton";
 import GhostLogo from "@/components/GhostLogo";
-import FaucetButton from "@/components/FaucetButton";
 
 const navItems = [
-  { href: "/privacy", label: "Swap" },
+  { href: "/private", label: "Private balance" },
   { href: "/orders", label: "Orders" },
-  { href: "/pools", label: "Pools" },
-  { href: "/liquidity", label: "Liquidity" },
-  { href: "/vault", label: "Vault" },
-  { href: "/admin", label: "Admin" },
 ];
 
 export default function Navbar() {
   const pathname = usePathname();
   const [mobileOpen, setMobileOpen] = useState(false);
-  const isNavActive = (href: string) =>
-    pathname === href || (href === "/privacy" && pathname === "/swap");
+  const isNavActive = (href: string) => pathname === href;
 
   return (
     <nav className="fixed top-0 left-0 right-0 z-50 w-full bg-background/80 backdrop-blur-xl border-b border-border">
@@ -61,7 +55,6 @@ export default function Navbar() {
           </div>
 
           <div className="flex items-center gap-2 shrink-0">
-            <FaucetButton />
             <ConnectButton />
             <button
               onClick={() => setMobileOpen(!mobileOpen)}
@@ -100,9 +93,6 @@ export default function Navbar() {
                   </Link>
                 );
               })}
-              <div className="pt-2 px-1">
-                <FaucetButton variant="full" />
-              </div>
             </div>
           </motion.div>
         )}

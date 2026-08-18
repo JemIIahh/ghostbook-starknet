@@ -83,14 +83,20 @@ snforge test
 
 ## Declare and deploy
 
-The constructor takes the privacy pool address. STRK20 pool on Starknet mainnet:
-`0x52107fadffab71bdcbb6b2ccb68ba3e1b5558d94036538053e159d3076ad633`.
+The constructor takes the privacy pool address. Verified mainnet values:
+
+| | |
+|---|---|
+| STRK20 privacy pool | `0x040337b1af3c663e86e333bab5a4b28da8d4652a15a69beee2b677776ffe812a` |
+| Ekubo router (`swap` + `IClear`) | `0x0199741822c2dc722f6f605204f35e56dbc23bceed54818168c4c49e4fb8737e` |
+| RPC | `https://rpc.starknet.lava.build` |
+| Chain | `SN_MAIN` |
 
 ```bash
 scarb --profile release build
 sncast --account <ACCOUNT> declare --contract-name GhostBookAnonymizer --network mainnet
 sncast --account <ACCOUNT> deploy --class-hash <CLASS_HASH> \
-  --constructor-calldata 0x52107fadffab71bdcbb6b2ccb68ba3e1b5558d94036538053e159d3076ad633 \
+  --constructor-calldata 0x040337b1af3c663e86e333bab5a4b28da8d4652a15a69beee2b677776ffe812a \
   --network mainnet
 ```
 

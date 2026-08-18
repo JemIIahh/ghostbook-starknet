@@ -4,6 +4,7 @@
 //! interval pacing, expiry, limit price, partial-fill rejection, exact-funding requirement,
 //! plan/pool-key consistency, and plan-hash keying (salt isolates budgets).
 
+use ekubo::types::keys::PoolKey;
 use ghostbook_anonymizer::ghostbook_anonymizer::{
     IGhostBookAnonymizerDispatcherTrait, OrderPlan, PlanState,
 };
@@ -224,6 +225,37 @@ fn test_required_out_scales_with_limit_price() {
 fn test_get_privacy_pool() {
     let fixture = setup();
     assert_eq!(dispatcher(fixture).get_privacy_pool(), POOL);
+}
+
+/// Pins the plan hash against the frontend's `planHash()` in `src/lib/strk20/plan.ts`.
+///
+/// The frontend must derive the same key to read a plan's progress and to build invoke calldata, so
+/// this asserts the exact `poseidon(serialize(plan))` value computed by starknet.js for the same
+/// plan. Regenerate with `node scripts/plan-hash.mjs` if the struct ever changes.
+#[test]
+fn test_plan_hash_matches_frontend() {
+    let fixture = setup();
+    let plan = OrderPlan {
+        salt: 'salt-1',
+        token_in: 0x111.try_into().unwrap(),
+        pool_key: PoolKey {
+            token0: 0x111.try_into().unwrap(),
+            token1: 0x222.try_into().unwrap(),
+            fee: 7,
+            tick_spacing: 5,
+            extension: 0.try_into().unwrap(),
+        },
+        total_amount: 3000,
+        max_slice: 1000,
+        min_interval: 60,
+        expiry: 1086400,
+        limit_num: 1,
+        limit_den: 1,
+    };
+    assert_eq!(
+        dispatcher(fixture).compute_plan_hash(plan),
+        0xe1fb5261ae5ee40daa1a8b71bdff7d4537d21e71c867b732c94a70cb04045f,
+    );
 }
 
 #[test]
