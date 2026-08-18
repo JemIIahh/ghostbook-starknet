@@ -1,0 +1,35 @@
+[package]
+name = "ghostbook_anonymizer"
+version = "0.1.0"
+edition = "2024_07"
+
+[dependencies]
+starknet = "2.20.0"
+ekubo = { git = "https://github.com/EkuboProtocol/starknet-contracts", rev = "8b4de8b5701d10b101c06b786740bf45b6cf15cb" }
+privacy = { git = "https://github.com/starkware-libs/starknet-privacy", tag = "PRIVACY-0.14.3-RC.0" }
+
+[dev-dependencies]
+snforge_std = "0.63.0"
+assert_macros = "2.20.0"
+
+[features]
+test_utils = []
+
+[scripts]
+test = "snforge test"
+
+[[test]]
+name = "ghostbook_anonymizer_unittest"
+build-external-contracts = [
+    "ghostbook_anonymizer::test_contracts::mock_erc20::MockERC20",
+    "ghostbook_anonymizer::test_contracts::mock_router::MockRouter",
+]
+
+[tool]
+fmt.sort-module-level-items = true
+scarb.allow-prebuilt-plugins = ["snforge_std"]
+
+[[target.starknet-contract]]
+sierra = true
+casm = true
+casm-add-pythonic-hints = true
