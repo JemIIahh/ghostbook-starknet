@@ -10,9 +10,8 @@
  */
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { ArrowDownToLine, ArrowUpFromLine, RefreshCw, Send } from "lucide-react";
+import { RefreshCw } from "lucide-react";
 import GhostPageShell from "@/components/GhostPageShell";
-import GhostLoader from "@/components/GhostLoader";
 import TokenIcon from "@/components/TokenIcon";
 import ConnectButton from "@/components/wallet/ConnectButton";
 import { useWallet } from "@/context/WalletContext";
@@ -27,27 +26,31 @@ import {
 } from "@/lib/strk20/actions";
 import { useStrk20Submit } from "@/lib/strk20/useStrk20Submit";
 import { fromSmallestUnit, toSmallestUnit } from "@/lib/strk20/plan";
+import { friendlyError } from "@/lib/errors";
 
 type Tab = "shield" | "transfer" | "unshield";
 
-const TABS: Array<{ key: Tab; label: string; icon: typeof ArrowDownToLine; hint: string }> = [
+const TABS: Array<{ key: Tab; label: string; cta: string; hint: string; visibility: string }> = [
   {
     key: "shield",
     label: "Shield",
-    icon: ArrowDownToLine,
-    hint: "Deposit into the pool. Public: your address, the token and the amount.",
+    cta: "Shield",
+    hint: "Deposit an ERC-20 and receive an encrypted note.",
+    visibility: "Public: your address, the token, the amount. Deposits are screened on-chain.",
   },
   {
     key: "transfer",
-    label: "Private transfer",
-    icon: Send,
-    hint: "Note to note. On-chain this reveals no amount and no parties.",
+    label: "Transfer",
+    cta: "Send privately",
+    hint: "Move value note to note, inside the pool.",
+    visibility: "Private: no amount and no parties appear on-chain. This is the real privacy.",
   },
   {
     key: "unshield",
     label: "Unshield",
-    icon: ArrowUpFromLine,
-    hint: "Withdraw to a public address. Destination and amount are public.",
+    cta: "Unshield",
+    hint: "Withdraw from a note to a public address.",
+    visibility: "Public: destination and amount. Private: which deposit it came from.",
   },
 ];
 
@@ -64,16 +67,15 @@ export default function PrivateBalancePage() {
   const [loadingBalances, setLoadingBalances] = useState(false);
 
   const token = useMemo(() => tokenByAddress(tokenAddress) ?? TOKENS[0], [tokenAddress]);
-  const activeTab = TABS.find((t) => t.key === tab)!;
+  const active = TABS.find((t) => t.key === tab)!;
 
   const refreshBalances = useCallback(async () => {
     if (!walletAccount) return;
     setLoadingBalances(true);
     try {
-      const raw = await walletAccount.strk20Balances([]);
-      setBalances(parseShieldedBalances(raw));
+      setBalances(parseShieldedBalances(await walletAccount.strk20Balances([])));
     } catch (err) {
-      showError(err instanceof Error ? err.message : "Could not read shielded balances.");
+      showError(friendlyError(err, "Could not read shielded balances."));
     } finally {
       setLoadingBalances(false);
     }
@@ -83,9 +85,9 @@ export default function PrivateBalancePage() {
     if (walletAccount) void refreshBalances();
   }, [walletAccount, refreshBalances]);
 
-  const shieldedOf = (tokenAddr: string): bigint => {
+  const shieldedOf = (addr: string): bigint => {
     if (!balances) return 0n;
-    const target = BigInt(tokenAddr);
+    const target = BigInt(addr);
     return balances.find((b) => BigInt(b.token) === target)?.amount ?? 0n;
   };
 
@@ -120,179 +122,196 @@ export default function PrivateBalancePage() {
           ? privateTransferActions(token.address, parsed, to)
           : unshieldActions(token.address, parsed, to);
 
-    showInfo("Confirm in your wallet. Privacy-pool transactions take a moment to prove.");
+    showInfo("Confirm in your wallet — the proof takes a moment.");
     const result = await submit(actions);
     if (result.status === "success") {
-      showSuccess(`${activeTab.label} confirmed.`);
+      showSuccess(`${active.label} confirmed.`);
       setAmount("");
       void refreshBalances();
     } else if (result.error) {
-      showError(result.error);
+      showError(friendlyError(result.error));
     }
   };
 
   return (
     <GhostPageShell
-      title="Private balance"
-      subtitle="Shield, transfer privately, unshield — through the STRK20 pool"
-      maxWidth="md"
+      eyebrow="Private balance"
+      title="Shield. Send. Unshield."
+      subtitle="The STRK20 pool holds ERC-20s as encrypted notes. Deposits and withdrawals are public by design; what happens between them is not."
+      maxWidth="lg"
       headerRight={
         isConnected ? (
           <button
             onClick={() => void refreshBalances()}
             disabled={loadingBalances}
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-surface border border-border text-[12px] hover:bg-surface-2 disabled:opacity-50 transition-colors"
+            className="btn btn-ghost !py-2 !px-3.5"
           >
             <RefreshCw className={`w-3.5 h-3.5 ${loadingBalances ? "animate-spin" : ""}`} />
-            Balances
+            Refresh
           </button>
         ) : null
       }
     >
-      <div className="rounded-2xl bg-surface border border-border p-4 sm:p-5">
-        <div className="flex gap-1 p-1 rounded-full bg-surface-2 mb-4">
-          {TABS.map(({ key, label, icon: Icon }) => (
-            <button
-              key={key}
-              onClick={() => setTab(key)}
-              className={`flex-1 flex items-center justify-center gap-1.5 px-2 py-2 rounded-full text-[12px] sm:text-[13px] font-medium transition-colors ${
-                tab === key ? "bg-surface text-foreground" : "text-text-secondary hover:text-foreground"
-              }`}
-            >
-              <Icon className="w-3.5 h-3.5" />
-              {label}
-            </button>
-          ))}
-        </div>
-
-        <p className="text-[12px] text-text-secondary mb-4">{activeTab.hint}</p>
-
-        <label className="block text-[11px] uppercase tracking-wide text-text-secondary mb-1.5">
-          Token
-        </label>
-        <div className="flex gap-2 mb-4">
-          {TOKENS.map((t) => (
-            <button
-              key={t.address}
-              onClick={() => setTokenAddress(t.address)}
-              className={`flex items-center gap-2 px-3 py-2 rounded-xl border text-sm transition-colors ${
-                BigInt(t.address) === BigInt(tokenAddress)
-                  ? "border-primary bg-primary-soft"
-                  : "border-border bg-surface-2 hover:border-border-hover"
-              }`}
-            >
-              <TokenIcon symbol={t.symbol} size="sm" />
-              {t.symbol}
-            </button>
-          ))}
-        </div>
-
-        <label className="block text-[11px] uppercase tracking-wide text-text-secondary mb-1.5">
-          Amount
-        </label>
-        <div className="flex items-center gap-2 rounded-xl bg-surface-2 border border-border px-3 py-2.5 mb-1">
-          <input
-            type="number"
-            min="0"
-            step="any"
-            value={amount}
-            onChange={(event) => setAmount(event.target.value)}
-            placeholder="0.0"
-            className="flex-1 bg-transparent outline-none text-lg tabular-nums"
-          />
-          <span className="text-sm text-text-secondary">{token.symbol}</span>
-        </div>
-        <p className="text-[11px] text-text-secondary mb-4">
-          Shielded: {fromSmallestUnit(shieldedOf(token.address), token.decimals)} {token.symbol}
-        </p>
-
-        {tab !== "shield" ? (
-          <>
-            <label className="block text-[11px] uppercase tracking-wide text-text-secondary mb-1.5">
-              {tab === "transfer" ? "Recipient (Starknet address)" : "Withdraw to"}
-            </label>
-            <input
-              value={recipient}
-              onChange={(event) => setRecipient(event.target.value)}
-              placeholder={address ?? "0x…"}
-              className="w-full rounded-xl bg-surface-2 border border-border px-3 py-2.5 mb-4 text-sm font-mono outline-none focus:border-border-hover"
-            />
-          </>
-        ) : null}
-
-        {!isConnected ? (
-          <ConnectButton />
-        ) : !isSupportedNetwork ? (
-          <p className="text-[12px] text-warning">
-            Switch your wallet to Starknet Mainnet — the STRK20 pool lives there.
-          </p>
-        ) : (
-          <button
-            onClick={() => void run()}
-            disabled={isBusy}
-            className="w-full py-3 rounded-xl bg-primary hover:bg-primary-hover disabled:opacity-60 text-white font-semibold transition-colors"
-          >
-            {isBusy ? (status === "signing" ? "Waiting for wallet…" : "Proving & relaying…") : activeTab.label}
-          </button>
-        )}
-
-        {isBusy ? (
-          <div className="mt-4 flex items-center gap-3 text-[12px] text-text-secondary">
-            <GhostLoader size="sm" />
-            Private transactions verify a STARK proof on-chain — this can take a minute.
+      <div className="grid lg:grid-cols-[1.15fr_0.85fr] gap-4">
+        {/* ── Action panel ─────────────────────────────────────────────── */}
+        <div className="panel p-6 sm:p-7">
+          <div className="flex gap-px bg-border border border-border">
+            {TABS.map((t) => (
+              <button
+                key={t.key}
+                onClick={() => setTab(t.key)}
+                className={`flex-1 px-3 py-3 mono text-[11px] tracking-[0.16em] uppercase transition-colors ${
+                  tab === t.key
+                    ? "bg-primary text-white"
+                    : "bg-background text-text-secondary hover:text-foreground"
+                }`}
+              >
+                {t.label}
+              </button>
+            ))}
           </div>
-        ) : null}
 
-        {txHash ? (
-          <a
-            href={explorerTxUrl(network, txHash)}
-            target="_blank"
-            rel="noreferrer"
-            className="mt-4 block text-[12px] text-primary hover:underline font-mono truncate"
-          >
-            {txHash} ↗
-          </a>
-        ) : null}
-      </div>
+          <p className="mt-5 text-[13px] leading-relaxed text-text-secondary">{active.hint}</p>
 
-      <div className="mt-4 rounded-2xl bg-surface border border-border p-4">
-        <h2 className="text-sm font-semibold mb-2">Shielded balances</h2>
-        {!isConnected ? (
-          <p className="text-[12px] text-text-secondary">Connect a wallet to read your notes.</p>
-        ) : balances === null ? (
-          <p className="text-[12px] text-text-secondary">Loading…</p>
-        ) : balances.length === 0 ? (
-          <p className="text-[12px] text-text-secondary">
-            Nothing shielded yet. Shield a token to create your first note.
-          </p>
-        ) : (
-          <ul className="space-y-1.5">
-            {balances.map((balance) => {
-              const info = tokenByAddress(balance.token);
-              return (
-                <li
-                  key={balance.token}
-                  className="flex items-center justify-between text-sm py-1.5 border-b border-border last:border-0"
+          <div className="mt-7">
+            <p className="label">Token</p>
+            <div className="mt-2.5 flex flex-wrap gap-2">
+              {TOKENS.map((t) => (
+                <button
+                  key={t.address}
+                  onClick={() => setTokenAddress(t.address)}
+                  data-active={BigInt(t.address) === BigInt(tokenAddress)}
+                  className="chip"
                 >
-                  <span className="flex items-center gap-2">
-                    <TokenIcon symbol={info?.symbol ?? "?"} size="sm" />
-                    {info?.symbol ?? `${balance.token.slice(0, 10)}…`}
-                  </span>
-                  <span className="tabular-nums">
-                    {fromSmallestUnit(balance.amount, info?.decimals ?? 18)}
-                  </span>
-                </li>
-              );
-            })}
-          </ul>
-        )}
-      </div>
+                  <TokenIcon symbol={t.symbol} size="sm" />
+                  {t.symbol}
+                </button>
+              ))}
+            </div>
+          </div>
 
-      <p className="mt-4 text-[11px] leading-relaxed text-text-secondary">
-        Deposits and withdrawals are public by design — the pool records the depositor, token and
-        amount. Note-to-note transfers reveal neither amount nor parties. GhostBook claims identity
-        privacy, not amount privacy.
-      </p>
+          <div className="mt-6">
+            <div className="flex items-baseline justify-between">
+              <p className="label">Amount</p>
+              <p className="mono text-[10px] tracking-[0.14em] uppercase text-text-tertiary">
+                shielded {fromSmallestUnit(shieldedOf(token.address), token.decimals)} {token.symbol}
+              </p>
+            </div>
+            <div className="mt-2.5 flex items-stretch border border-border focus-within:border-primary transition-colors">
+              <input
+                type="number"
+                min="0"
+                step="any"
+                value={amount}
+                onChange={(event) => setAmount(event.target.value)}
+                placeholder="0.00"
+                className="flex-1 bg-[#101010] px-4 py-3.5 display text-[clamp(22px,2.4vw,30px)] tabular-nums outline-none"
+              />
+              <span className="grid place-items-center px-4 bg-surface-2 mono text-[12px] tracking-[0.1em] text-text-secondary border-l border-border">
+                {token.symbol}
+              </span>
+            </div>
+          </div>
+
+          {tab !== "shield" ? (
+            <div className="mt-6">
+              <p className="label">{tab === "transfer" ? "Recipient" : "Withdraw to"}</p>
+              <input
+                value={recipient}
+                onChange={(event) => setRecipient(event.target.value)}
+                placeholder={address ?? "0x…"}
+                className="field mono text-[12px] mt-2.5"
+              />
+              <p className="mt-2 text-[11px] text-text-tertiary">
+                Leave empty to use your connected account.
+              </p>
+            </div>
+          ) : null}
+
+          <div className="mt-7 border-t border-line-subtle pt-5">
+            <p className="text-[11px] leading-relaxed text-text-tertiary">{active.visibility}</p>
+          </div>
+
+          <div className="mt-5">
+            {!isConnected ? (
+              <ConnectButton />
+            ) : !isSupportedNetwork ? (
+              <p className="mono text-[11px] tracking-[0.12em] uppercase text-warning">
+                Switch to Starknet Mainnet
+              </p>
+            ) : (
+              <button onClick={() => void run()} disabled={isBusy} className="btn btn-orange w-full">
+                {isBusy
+                  ? status === "signing"
+                    ? "Waiting for wallet…"
+                    : "Proving & relaying…"
+                  : active.cta}
+              </button>
+            )}
+          </div>
+
+          {isBusy ? (
+            <p className="mt-4 mono text-[10px] tracking-[0.18em] uppercase text-text-tertiary flex items-center gap-2">
+              <span className="w-1.5 h-1.5 bg-primary rounded-full pulse-dot" />
+              Verifying a STARK proof on-chain
+            </p>
+          ) : null}
+
+          {txHash ? (
+            <a
+              href={explorerTxUrl(network, txHash)}
+              target="_blank"
+              rel="noreferrer"
+              className="mt-4 block mono text-[11px] text-primary hover:underline truncate"
+            >
+              {txHash} ↗
+            </a>
+          ) : null}
+        </div>
+
+        {/* ── Notes ────────────────────────────────────────────────────── */}
+        <div className="panel-flat p-6 sm:p-7 h-fit">
+          <p className="tag">[ Shielded balances ]</p>
+
+          {!isConnected ? (
+            <p className="mt-5 text-[13px] text-text-secondary leading-relaxed">
+              Connect a wallet to read your notes. The wallet decrypts them locally — this app never
+              sees your viewing key.
+            </p>
+          ) : balances === null ? (
+            <p className="mt-5 mono text-[11px] tracking-[0.16em] uppercase text-text-tertiary">
+              Reading…
+            </p>
+          ) : balances.length === 0 ? (
+            <p className="mt-5 text-[13px] text-text-secondary leading-relaxed">
+              Nothing shielded yet. Shield a token to create your first note, then trade it privately
+              from <span className="text-primary">Orders</span>.
+            </p>
+          ) : (
+            <ul className="mt-5 divide-y divide-line-subtle">
+              {balances.map((balance) => {
+                const info = tokenByAddress(balance.token);
+                return (
+                  <li key={balance.token} className="flex items-center justify-between gap-3 py-3.5">
+                    <TokenIcon symbol={info?.symbol ?? "?"} size="sm" showLabel />
+                    <span className="display text-[19px] tabular-nums">
+                      {fromSmallestUnit(balance.amount, info?.decimals ?? 18)}
+                    </span>
+                  </li>
+                );
+              })}
+            </ul>
+          )}
+
+          <div className="mt-7 border-t border-border pt-5 space-y-3">
+            <p className="label">Before your first shield</p>
+            <p className="text-[12px] leading-relaxed text-text-secondary">
+              Every pool user registers a viewing key once, on-chain. Wallets with STRK20 support do
+              this for you the first time you shield.
+            </p>
+          </div>
+        </div>
+      </div>
     </GhostPageShell>
   );
 }

@@ -30,9 +30,9 @@ const TYPE_STYLES: Record<
 > = {
   success: {
     icon: CheckCircle2,
-    iconClass: "text-[#b8ff30]",
-    bar: "bg-[#b8ff30]",
-    label: "Success",
+    iconClass: "text-primary",
+    bar: "bg-primary",
+    label: "Confirmed",
   },
   error: {
     icon: AlertCircle,
@@ -42,15 +42,15 @@ const TYPE_STYLES: Record<
   },
   warning: {
     icon: AlertTriangle,
-    iconClass: "text-amber-400",
-    bar: "bg-amber-400",
+    iconClass: "text-warning",
+    bar: "bg-warning",
     label: "Warning",
   },
   info: {
     icon: Info,
-    iconClass: "text-sky-400",
-    bar: "bg-sky-400",
-    label: "Info",
+    iconClass: "text-text-secondary",
+    bar: "bg-text-tertiary",
+    label: "Status",
   },
 };
 

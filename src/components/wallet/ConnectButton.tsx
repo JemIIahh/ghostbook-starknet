@@ -1,18 +1,10 @@
 "use client";
 
-import { useEffect, useRef, useState, type CSSProperties } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Check, Copy, ExternalLink, LogOut } from "lucide-react";
 import type { WalletWithStarknetFeatures } from "@starknet-io/get-starknet-wallet-standard/features";
 import { useWallet } from "@/context/WalletContext";
 import { explorerContractUrl } from "@/lib/starknet/config";
-import GhostLoader from "@/components/GhostLoader";
-
-/** Deterministic gradient from an address for the avatar ring. */
-function avatarStyle(address: string): CSSProperties {
-  const hue = parseInt(address.slice(4, 10), 16) % 360;
-  const hue2 = (hue + 48) % 360;
-  return { background: `linear-gradient(135deg, hsl(${hue} 70% 48%), hsl(${hue2} 65% 38%))` };
-}
 
 export default function ConnectButton() {
   const {
@@ -30,18 +22,16 @@ export default function ConnectButton() {
   } = useWallet();
 
   const [pickerOpen, setPickerOpen] = useState(false);
-  const [dropdownOpen, setDropdownOpen] = useState(false);
+  const [menuOpen, setMenuOpen] = useState(false);
   const [copied, setCopied] = useState(false);
-  const dropdownRef = useRef<HTMLDivElement>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    function handleClickOutside(event: MouseEvent) {
-      if (dropdownRef.current && !dropdownRef.current.contains(event.target as Node)) {
-        setDropdownOpen(false);
-      }
+    function onClickOutside(event: MouseEvent) {
+      if (menuRef.current && !menuRef.current.contains(event.target as Node)) setMenuOpen(false);
     }
-    document.addEventListener("mousedown", handleClickOutside);
-    return () => document.removeEventListener("mousedown", handleClickOutside);
+    document.addEventListener("mousedown", onClickOutside);
+    return () => document.removeEventListener("mousedown", onClickOutside);
   }, []);
 
   const copyAddress = async () => {
@@ -56,65 +46,66 @@ export default function ConnectButton() {
       await connect(wallet);
       setPickerOpen(false);
     } catch {
-      /* error surfaces from context */
+      /* surfaced from context */
     }
   };
 
   if (isConnected && address) {
     return (
-      <div className="relative" ref={dropdownRef}>
+      <div className="relative" ref={menuRef}>
         <button
-          onClick={() => setDropdownOpen((open) => !open)}
-          className="flex items-center gap-2 pl-1.5 pr-3 py-1.5 rounded-full bg-surface hover:bg-surface-2 border border-border transition-colors"
+          onClick={() => setMenuOpen((open) => !open)}
+          className="btn btn-ghost !py-2 !px-3 gap-2"
         >
-          <span className="w-6 h-6 rounded-full shrink-0" style={avatarStyle(address)} />
-          <span className="text-[13px] font-medium tabular-nums">{shortAddress}</span>
           <span
-            className={`w-1.5 h-1.5 rounded-full ${isSupportedNetwork ? "bg-[#b8ff30]" : "bg-orange-400"}`}
-            title={isSupportedNetwork ? `${network.label} · STRK20 available` : "Unsupported network"}
+            className={`w-1.5 h-1.5 rounded-full ${isSupportedNetwork ? "bg-primary" : "bg-warning"}`}
           />
+          <span className="mono text-[11px] tracking-[0.06em] normal-case">{shortAddress}</span>
         </button>
 
-        {dropdownOpen ? (
-          <div className="absolute right-0 mt-2 w-64 rounded-2xl bg-surface border border-border shadow-xl overflow-hidden z-50">
+        {menuOpen ? (
+          <div className="absolute right-0 mt-2 w-[268px] panel-flat z-50">
             <div className="px-4 py-3 border-b border-border">
-              <p className="text-[11px] uppercase tracking-wide text-text-secondary">Network</p>
-              <p className="text-sm font-medium mt-0.5">
-                {isSupportedNetwork ? network.label : "Unsupported"}
+              <p className="label">Network</p>
+              <p className="mono text-[12px] mt-1">
+                {isSupportedNetwork ? network.label.toUpperCase() : "UNSUPPORTED"}
               </p>
               {!isSupportedNetwork ? (
-                <p className="text-[11px] text-orange-400 mt-1">
+                <p className="text-[11px] text-warning mt-1.5 leading-relaxed">
                   Switch your wallet to Starknet Mainnet — the STRK20 pool lives there.
                 </p>
-              ) : null}
-              {chainId ? (
-                <p className="text-[10px] text-text-secondary mt-1 font-mono truncate">{chainId}</p>
+              ) : chainId ? (
+                <p className="mono text-[10px] text-text-ghost mt-1 truncate">{chainId}</p>
               ) : null}
             </div>
             <button
               onClick={copyAddress}
-              className="w-full flex items-center gap-2 px-4 py-2.5 text-sm text-left hover:bg-surface-2 transition-colors"
+              className="w-full flex items-center gap-2.5 px-4 py-3 mono text-[11px] tracking-[0.12em] uppercase text-text-secondary hover:text-foreground hover:bg-surface-2 transition-colors"
             >
-              {copied ? <Check className="w-4 h-4 text-[#b8ff30]" /> : <Copy className="w-4 h-4" />}
+              {copied ? (
+                <Check className="w-3.5 h-3.5 text-primary" />
+              ) : (
+                <Copy className="w-3.5 h-3.5" />
+              )}
               {copied ? "Copied" : "Copy address"}
             </button>
             <a
               href={explorerContractUrl(network, address)}
               target="_blank"
               rel="noreferrer"
-              className="w-full flex items-center gap-2 px-4 py-2.5 text-sm hover:bg-surface-2 transition-colors"
+              className="w-full flex items-center gap-2.5 px-4 py-3 mono text-[11px] tracking-[0.12em] uppercase text-text-secondary hover:text-foreground hover:bg-surface-2 transition-colors"
             >
-              <ExternalLink className="w-4 h-4" />
-              View on Voyager
+              <ExternalLink className="w-3.5 h-3.5" />
+              Voyager ↗
             </a>
             <button
               onClick={() => {
                 disconnect();
-                setDropdownOpen(false);
+                setMenuOpen(false);
               }}
-              className="w-full flex items-center gap-2 px-4 py-2.5 text-sm text-left text-red-400 hover:bg-surface-2 transition-colors"
+              className="w-full flex items-center gap-2.5 px-4 py-3 mono text-[11px] tracking-[0.12em] uppercase text-text-secondary hover:text-danger hover:bg-surface-2 transition-colors border-t border-line-subtle"
             >
-              <LogOut className="w-4 h-4" />
+              <LogOut className="w-3.5 h-3.5" />
               Disconnect
             </button>
           </div>
@@ -125,70 +116,60 @@ export default function ConnectButton() {
 
   return (
     <>
-      <button
-        onClick={() => setPickerOpen(true)}
-        disabled={isPending}
-        className="px-4 py-2 rounded-full bg-primary text-background text-[13px] font-semibold hover:opacity-90 disabled:opacity-60 transition-opacity"
-      >
+      <button onClick={() => setPickerOpen(true)} disabled={isPending} className="btn btn-orange !py-2.5">
         {isPending ? "Connecting…" : "Connect"}
       </button>
 
       {pickerOpen ? (
         <div
-          className="fixed inset-0 z-[60] bg-black/70 backdrop-blur-sm flex items-center justify-center px-4"
+          className="fixed inset-0 z-[60] bg-black/80 backdrop-blur-sm flex items-center justify-center px-4"
           onClick={() => !isPending && setPickerOpen(false)}
         >
           <div
-            className="w-full max-w-sm rounded-2xl bg-surface border border-border p-5"
+            className="w-full max-w-[420px] panel p-6"
             onClick={(event) => event.stopPropagation()}
           >
-            <div className="flex items-center justify-between mb-4">
-              <h2 className="text-base font-semibold">Connect a Starknet wallet</h2>
-              <button
-                onClick={() => setPickerOpen(false)}
-                className="text-text-secondary hover:text-foreground text-lg leading-none"
-                aria-label="Close"
-              >
-                ×
-              </button>
-            </div>
+            <p className="eyebrow mb-3">
+              <b>◢</b> Connect
+            </p>
+            <h2 className="display text-[26px] mb-1">Starknet wallet</h2>
+            <p className="text-[13px] text-text-secondary mb-5 leading-relaxed">
+              GhostBook needs a wallet implementing the STRK20 wallet API — it performs the private
+              actions, so this app never touches your viewing key.
+            </p>
 
-            {isPending ? (
-              <div className="py-6 flex justify-center">
-                <GhostLoader size="lg" />
-              </div>
-            ) : wallets.length ? (
+            {wallets.length ? (
               <div className="space-y-2">
                 {wallets.map((wallet) => (
                   <button
                     key={wallet.name}
                     onClick={() => pick(wallet)}
-                    className="w-full flex items-center gap-3 px-3 py-3 rounded-xl bg-surface-2 hover:bg-border transition-colors text-left"
+                    disabled={isPending}
+                    className="w-full flex items-center gap-3 px-3 py-3 border border-border rounded-[2px] hover:border-primary/50 hover:bg-primary-soft transition-colors text-left disabled:opacity-50"
                   >
                     {/* eslint-disable-next-line @next/next/no-img-element */}
-                    <img src={wallet.icon} alt="" className="w-7 h-7 rounded-lg" />
-                    <span className="text-sm font-medium flex-1">{wallet.name}</span>
-                    <span className="text-text-secondary">→</span>
+                    <img src={wallet.icon} alt="" className="w-6 h-6" />
+                    <span className="mono text-[12px] tracking-[0.06em] flex-1">{wallet.name}</span>
+                    <span className="text-primary">→</span>
                   </button>
                 ))}
               </div>
             ) : (
-              <p className="text-sm text-text-secondary">
-                No Starknet wallet detected. GhostBook needs a wallet that implements the STRK20
-                wallet API —{" "}
+              <p className="text-[13px] text-text-secondary">
+                No Starknet wallet detected.{" "}
                 <a
                   className="text-primary hover:underline"
                   href="https://www.ready.co/"
                   target="_blank"
                   rel="noreferrer"
                 >
-                  Ready
+                  Ready ↗
                 </a>{" "}
-                supports it today.
+                supports STRK20 today.
               </p>
             )}
 
-            {error ? <p className="text-xs text-red-400 mt-3">{error}</p> : null}
+            {error ? <p className="text-[12px] text-danger mt-4">{error}</p> : null}
           </div>
         </div>
       ) : null}

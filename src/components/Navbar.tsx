@@ -4,99 +4,76 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { Menu, X } from "lucide-react";
 import { useState } from "react";
-import { motion, AnimatePresence } from "framer-motion";
 import ConnectButton from "@/components/wallet/ConnectButton";
 import GhostLogo from "@/components/GhostLogo";
 
 const navItems = [
-  { href: "/private", label: "Private balance" },
   { href: "/orders", label: "Orders" },
+  { href: "/private", label: "Balance" },
 ];
 
 export default function Navbar() {
   const pathname = usePathname();
   const [mobileOpen, setMobileOpen] = useState(false);
-  const isNavActive = (href: string) => pathname === href;
 
   return (
-    <nav className="fixed top-0 left-0 right-0 z-50 w-full bg-background/80 backdrop-blur-xl border-b border-border">
-      <div className="w-full px-4 sm:px-6 lg:px-8">
-        <div className="flex items-center justify-between h-14 w-full">
-          <Link href="/" className="flex items-center gap-2.5 shrink-0 group">
-            <GhostLogo
-              size={44}
-              priority
-              className="w-10 h-10 sm:w-11 sm:h-11 drop-shadow-[0_0_10px_rgba(184,255,48,0.4)] group-hover:scale-105 transition-transform"
-            />
-            <span className="text-[17px] sm:text-lg font-semibold tracking-tight">
-              GhostBook
-            </span>
+    <nav className="fixed top-0 left-0 right-0 z-50 w-full bg-background/85 backdrop-blur-md border-b border-border">
+      <div className="mx-auto max-w-[1280px] px-[clamp(20px,5vw,72px)]">
+        <div className="flex items-center justify-between h-14">
+          <Link href="/" className="group flex items-center gap-2.5">
+            <GhostLogo size={26} priority className="w-[26px] h-[26px]" />
+            <span className="display text-[15px] tracking-[-0.01em]">Ghostbook</span>
+            <span className="tag hidden sm:inline ml-1 text-text-ghost">[ STRK20 ]</span>
           </Link>
 
-          <div className="hidden md:flex flex-1 justify-center">
-            <div className="flex items-center gap-0.5 bg-surface rounded-full p-1">
-              {navItems.map((item) => {
-                const isActive = isNavActive(item.href);
-                return (
-                  <Link
-                    key={item.href}
-                    href={item.href}
-                    className={`px-3 py-1.5 rounded-full text-[13px] font-medium transition-colors whitespace-nowrap ${
-                      isActive
-                        ? "bg-surface-2 text-foreground"
-                        : "text-text-secondary hover:text-foreground"
-                    }`}
-                  >
-                    {item.label}
-                  </Link>
-                );
-              })}
-            </div>
+          <div className="hidden md:flex items-center gap-7">
+            {navItems.map((item) => {
+              const active = pathname === item.href;
+              return (
+                <Link
+                  key={item.href}
+                  href={item.href}
+                  className={`mono text-[11px] tracking-[0.22em] uppercase transition-colors ${
+                    active ? "text-primary" : "text-text-secondary hover:text-foreground"
+                  }`}
+                >
+                  {item.label}
+                </Link>
+              );
+            })}
           </div>
 
-          <div className="flex items-center gap-2 shrink-0">
+          <div className="flex items-center gap-2">
             <ConnectButton />
             <button
-              onClick={() => setMobileOpen(!mobileOpen)}
-              className="md:hidden p-2 rounded-full text-text-secondary hover:text-foreground hover:bg-surface transition-colors"
+              onClick={() => setMobileOpen((open) => !open)}
+              className="md:hidden p-2 text-text-secondary hover:text-foreground transition-colors"
               aria-label="Toggle menu"
             >
-              {mobileOpen ? <X className="w-5 h-5" /> : <Menu className="w-5 h-5" />}
+              {mobileOpen ? <X className="w-4 h-4" /> : <Menu className="w-4 h-4" />}
             </button>
           </div>
         </div>
       </div>
 
-      <AnimatePresence>
-        {mobileOpen && (
-          <motion.div
-            initial={{ opacity: 0, height: 0 }}
-            animate={{ opacity: 1, height: "auto" }}
-            exit={{ opacity: 0, height: 0 }}
-            className="md:hidden border-t border-border bg-background w-full overflow-hidden"
-          >
-            <div className="px-4 py-3 space-y-1">
-              {navItems.map((item) => {
-                const isActive = isNavActive(item.href);
-                return (
-                  <Link
-                    key={item.href}
-                    href={item.href}
-                    onClick={() => setMobileOpen(false)}
-                    className={`block px-4 py-2.5 rounded-xl text-[15px] font-medium transition-colors ${
-                      isActive
-                        ? "bg-surface text-foreground"
-                        : "text-text-secondary hover:text-foreground hover:bg-surface"
-                    }`}
-                  >
-                    {item.label}
-                  </Link>
-                );
-              })}
-            </div>
-          </motion.div>
-        )}
-      </AnimatePresence>
+      {mobileOpen ? (
+        <div className="md:hidden border-t border-border bg-background">
+          <div className="px-[clamp(20px,5vw,72px)] py-2">
+            {navItems.map((item) => (
+              <Link
+                key={item.href}
+                href={item.href}
+                onClick={() => setMobileOpen(false)}
+                className={`block py-3 mono text-[11px] tracking-[0.22em] uppercase border-b border-line-subtle last:border-0 ${
+                  pathname === item.href ? "text-primary" : "text-text-secondary"
+                }`}
+              >
+                {item.label}
+              </Link>
+            ))}
+          </div>
+        </div>
+      ) : null}
     </nav>
   );
 }
