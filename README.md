@@ -25,13 +25,17 @@ counterparty, and the order's schedule and limit never appear in a single reveal
 
 ### Privacy model (honest)
 
-| Stays private | Visible on-chain |
+| Stays private | Public on-chain |
 |---|---|
-| Link between trader and trade | Ekubo swap: pool, per-slice amounts |
-| Parent order terms (limit, budget, pacing, expiry) | Each fill's `SliceFilled` event |
-| Plan identity (`salt` makes `plan_hash` unlinkable) | Note deposits into the privacy pool |
+| Who is trading — the pool is the swap counterparty, and fills are relayed | Each slice's Ekubo swap: pool key, amounts, timing |
+| Note-to-note transfers: no amount, no parties | Shielding: your address, the token, the amount |
+| Which deposit a withdrawal came from | Withdrawal destination and amount |
+| The plan itself — terms are never published, only `poseidon(plan)` | Each fill's `SliceFilled` event, keyed by the salted plan hash |
 
-Slicing an order further weakens amount correlation, but it does not hide the swap itself.
+**GhostBook claims identity privacy, not amount privacy.** Slicing weakens amount correlation but
+does not hide the swap: a distinctive amount executed shortly after a distinctive deposit is still
+correlatable. Plan terms are not published, but an observer watching one plan hash can bound the
+limit price and pacing from the fills themselves.
 
 ## Enforced plan terms
 
@@ -69,16 +73,21 @@ privacy pool set in the constructor may call `privacy_invoke`.
 | RPC | `https://rpc.starknet.lava.build` |
 | Explorer | [voyager.online](https://voyager.online) |
 
-Traded tokens (deep Ekubo liquidity): **STRK**, **ETH**, **USDC**. All values live in
-`src/lib/starknet/config.ts`; the deployed anonymizer address comes from
-`NEXT_PUBLIC_ANONYMIZER_MAINNET`.
+Traded tokens: **STRK**, **ETH**, **USDC** (addresses verified on mainnet by `symbol`/`decimals`
+calls). Pool keys are resolved at runtime by quoting the router, because liquidity per fee tier
+varies and some pools use non-zero extensions the probe grid can't enumerate — at the time of
+writing, `STRK/ETH` and `ETH/USDC` price on the 100bps / 19802 tier, and `STRK/USDC` has no
+zero-extension pool in the probed grid. All values live in `src/lib/starknet/config.ts`; the deployed
+anonymizer address comes from `NEXT_PUBLIC_ANONYMIZER_MAINNET`.
 
 ## Quick start
 
 ### Prerequisites
 
 - Node.js 18+ and [pnpm](https://pnpm.io)
-- A Starknet wallet with STRK20 / privacy-pool support
+- A Starknet wallet implementing the STRK20 wallet API (Ready supports it today), on **Mainnet**
+- STRK for gas, and a registered viewing key on the pool — every pool user registers once, and
+  deposits are screened on-chain by a compliance provider
 - [Scarb](https://docs.swmansion.com/scarb/) + [Starknet Foundry](https://foundry-rs.github.io/starknet-foundry/) for the contract
 
 ### Run the app
@@ -96,7 +105,7 @@ Open [http://localhost:3000](http://localhost:3000).
 cd starknet
 scarb fmt
 scarb build
-snforge test        # 18 tests: access control, caps, pacing, expiry, limit price, partial fills
+snforge test        # 19 tests: access control, caps, pacing, expiry, limit price, partial fills, plan-hash mirror
 ```
 
 Declare and deploy (constructor takes the privacy pool address):
@@ -156,7 +165,7 @@ ghostbook/
 ├── scripts/                     # find-pools.mjs, quote.mjs (Ekubo probes)
 ├── public/                      # Brand assets
 └── src/
-    ├── app/                     # Next.js routes (orders/, landing, metadata)
+    ├── app/                     # Next.js routes: landing, /private, /orders
     ├── components/
     ├── context/
     └── lib/
@@ -166,10 +175,18 @@ ghostbook/
 
 ## Status
 
-The Cairo anonymizer and its test suite are the source of truth; `src/lib/starknet` and
-`src/lib/strk20` are the Starknet client layer. The remaining UI under `src/app` and
-`src/components` is still being ported to Starknet — some modules there still reference the
-previous EVM implementation and are being replaced.
+The Cairo anonymizer (19 passing tests) and the Starknet client layer are complete, and the UI is
+ported: `/private` covers shield, private transfer, unshield and shielded balances; `/orders` covers
+the plan builder, live Ekubo quotes and per-slice fills with on-chain progress. The frontend's
+`planHash()` is pinned against the contract by `test_plan_hash_matches_frontend`, so the two can't
+silently diverge.
+
+Not done yet: mainnet declare/deploy of the anonymizer, the three mainnet transactions and demo
+video recorded in `strk20.json`, and a hosted demo.
+
+GhostBook began as a TEE-based confidential DEX on Flare Coston2 (Uniswap V3 fork + `PrivacyRouter`).
+That stack has been removed: on Starknet the privacy is protocol-level via STRK20 rather than
+bolted on at the app layer, and settlement uses Ekubo's existing liquidity instead of a bespoke AMM.
 
 ## References
 
