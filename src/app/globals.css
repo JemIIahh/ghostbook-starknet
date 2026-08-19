@@ -119,10 +119,16 @@ input[type="number"] {
 }
 
 .label {
-  font-family: var(--font-mono);
-  font-size: 10px;
-  letter-spacing: 0.22em;
-  text-transform: uppercase;
+  font-size: 12px;
+  font-weight: 500;
+  letter-spacing: 0;
+  color: var(--color-text-secondary);
+}
+
+/* Helper copy under a control. */
+.hint {
+  font-size: 12px;
+  line-height: 1.55;
   color: var(--color-text-tertiary);
 }
 
@@ -137,8 +143,8 @@ input[type="number"] {
 .panel {
   position: relative;
   background:
-    radial-gradient(ellipse 70% 80% at 12% 0%, rgba(197, 52, 0, 0.13), transparent 60%),
-    linear-gradient(165deg, #181818 0%, #141414 48%, #100c0a 100%);
+    radial-gradient(ellipse 60% 70% at 12% 0%, rgba(197, 52, 0, 0.05), transparent 62%),
+    linear-gradient(168deg, #161616 0%, #141414 60%, #121110 100%);
   border: 1px solid var(--color-border);
   overflow: hidden;
 }
@@ -151,9 +157,7 @@ input[type="number"] {
 /* Feature panel: orange top rule + bloom rising from the base. */
 .panel-accent {
   position: relative;
-  background:
-    radial-gradient(ellipse 80% 60% at 50% 100%, rgba(197, 52, 0, 0.1), transparent 60%),
-    linear-gradient(165deg, #181818 0%, #141414 48%, #100c0a 100%);
+  background: #141414;
   border: 1px solid var(--color-border);
   border-top: 2px solid var(--color-primary);
   overflow: hidden;
@@ -169,25 +173,6 @@ input[type="number"] {
   transform: translateY(-4px);
   border-color: rgba(197, 52, 0, 0.5);
   box-shadow: 0 40px 70px -30px rgba(0, 0, 0, 0.7);
-}
-
-/* Oversized numeral bleeding off a card corner. */
-.ghost-numeral {
-  position: absolute;
-  top: -0.18em;
-  right: 0.06em;
-  font-family: var(--font-display);
-  font-weight: 700;
-  font-size: clamp(84px, 9vw, 150px);
-  line-height: 1;
-  color: rgba(197, 52, 0, 0.14);
-  pointer-events: none;
-  user-select: none;
-  transition: color 0.3s ease, transform 0.3s cubic-bezier(0.2, 0.7, 0.2, 1);
-}
-.panel-lift:hover .ghost-numeral {
-  color: rgba(197, 52, 0, 0.22);
-  transform: translate(-4px, 4px);
 }
 
 /* ── Controls ────────────────────────────────────────────────────────────── */
@@ -315,19 +300,8 @@ input[type="number"] {
   inset: 0;
   z-index: 1;
   pointer-events: none;
-  opacity: 0.04;
+  opacity: 0.015;
   background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='140' height='140'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='3'/%3E%3C/filter%3E%3Crect width='140' height='140' filter='url(%23n)'/%3E%3C/svg%3E");
-  animation: grain-shift 6s steps(4) infinite;
-}
-
-.scanlines {
-  position: fixed;
-  inset: 0;
-  z-index: 1;
-  pointer-events: none;
-  opacity: 0.35;
-  mix-blend-mode: multiply;
-  background: repeating-linear-gradient(0deg, transparent 0 3px, rgba(0, 0, 0, 0.18) 3px 4px);
 }
 
 /* One ambient bloom, anchored top-centre behind the content. */
@@ -336,15 +310,7 @@ input[type="number"] {
   inset: 0;
   z-index: 0;
   pointer-events: none;
-  background: radial-gradient(ellipse 60% 40% at 50% -5%, rgba(197, 52, 0, 0.14), transparent 60%);
-}
-
-@keyframes grain-shift {
-  0% { transform: translate(0, 0); }
-  25% { transform: translate(-2%, 1%); }
-  50% { transform: translate(1%, -2%); }
-  75% { transform: translate(2%, 2%); }
-  100% { transform: translate(0, 0); }
+  background: radial-gradient(ellipse 60% 40% at 50% -5%, rgba(197, 52, 0, 0.08), transparent 62%);
 }
 
 @keyframes reveal {
@@ -379,8 +345,5 @@ input[type="number"] {
     animation-duration: 0.001ms !important;
     animation-iteration-count: 1 !important;
     transition-duration: 0.001ms !important;
-  }
-  .grain {
-    animation: none;
   }
 }

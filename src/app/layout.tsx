@@ -130,10 +130,9 @@ export default function RootLayout({
       <body
         className={`${geistSans.variable} ${spaceGrotesk.variable} ${plexMono.variable} antialiased bg-background text-foreground`}
       >
-        {/* Ambient terminal texture: one bloom behind everything, grain and scanlines above. */}
+        {/* One soft ambient bloom and a barely-there grain. Nothing that competes with content. */}
         <div className="bloom" aria-hidden />
         <div className="grain" aria-hidden />
-        <div className="scanlines" aria-hidden />
 
         <Providers>
           <Navbar />

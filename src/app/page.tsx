@@ -7,22 +7,22 @@ const MECHANISM = [
   {
     n: "01",
     title: "Commit the plan",
-    body: "Limit price, slice size, total budget, minimum interval, expiry — hashed with your secret salt. The contract stores poseidon(plan), never the terms.",
+    body: "Your price, how much to sell, how many fills, how far apart, when it expires. Only a fingerprint of those terms goes on-chain — never the terms themselves.",
   },
   {
     n: "02",
     title: "Fill a slice",
-    body: "One private transaction: the pool withdraws a slice to the anonymizer, opens a note for the output, and invokes. Ekubo prices the swap.",
+    body: "One private transaction moves a chunk out of the pool, swaps it on Ekubo at the going rate, and routes what you bought straight back in.",
   },
   {
     n: "03",
     title: "Terms hold, or it reverts",
-    body: "Wrong price, oversized slice, too soon, past expiry, partial fill — each one aborts the whole transaction. Nothing leaves the pool.",
+    body: "Below your price, too large, too soon, past expiry — any of those aborts the whole transaction. Nothing leaves the pool.",
   },
   {
     n: "04",
     title: "Output lands private",
-    body: "The bought token is credited straight into your note as an OpenNoteDeposit. Repeat until the budget is spent or the plan expires.",
+    body: "What you bought lands back in your private balance. Repeat until the order is filled or it expires.",
   },
 ];
 
@@ -61,7 +61,7 @@ export default function Home() {
                 Open orders →
               </Link>
               <Link href="/private" className="btn btn-ghost">
-                Shield a balance ↓
+                Add funds ↓
               </Link>
             </div>
           </div>
@@ -85,17 +85,10 @@ export default function Home() {
 
           <div className="mt-12 grid sm:grid-cols-2 lg:grid-cols-4 gap-4">
             {MECHANISM.map((step) => (
-              <article key={step.n} className="panel panel-lift p-6 pt-8 min-h-[228px]">
-                <span className="ghost-numeral" aria-hidden>
-                  {step.n}
-                </span>
-                <p className="tag relative z-10">Step {step.n}</p>
-                <h3 className="relative z-10 mt-3 text-[17px] font-medium leading-snug">
-                  {step.title}
-                </h3>
-                <p className="relative z-10 mt-3 text-[13px] leading-relaxed text-text-secondary">
-                  {step.body}
-                </p>
+              <article key={step.n} className="panel-flat p-6">
+                <p className="mono text-[11px] text-primary">{step.n}</p>
+                <h3 className="mt-3 text-[16px] font-medium leading-snug">{step.title}</h3>
+                <p className="mt-2.5 text-[13px] leading-relaxed text-text-secondary">{step.body}</p>
               </article>
             ))}
           </div>
@@ -119,12 +112,12 @@ export default function Home() {
           </div>
 
           <div className="border border-border divide-y divide-border">
-            <TermRow code="limit_num / limit_den" body="output ≥ amount_in × limit — your price" />
-            <TermRow code="max_slice" body="maximum input per fill" />
-            <TermRow code="total_amount" body="maximum cumulative input across fills" />
-            <TermRow code="min_interval" body="minimum seconds between fills — TWAP pacing" />
-            <TermRow code="expiry" body="no fill after this timestamp" />
-            <TermRow code="salt" body="your secret — keeps the plan key unlinkable" />
+            <TermRow code="limit_num / limit_den" body="the price you refuse to sell below" />
+            <TermRow code="max_slice" body="most that can be sold in one fill" />
+            <TermRow code="total_amount" body="most that can be sold in total" />
+            <TermRow code="min_interval" body="how long the contract waits between fills" />
+            <TermRow code="expiry" body="after this time, no fill is possible" />
+            <TermRow code="salt" body="your secret, so the order can't be tied to you" />
           </div>
         </div>
       </section>
@@ -146,16 +139,16 @@ export default function Home() {
                 <ScopeItem>Who is trading — the pool is the counterparty and fills are relayed</ScopeItem>
                 <ScopeItem>Note-to-note transfers: no amount, no parties</ScopeItem>
                 <ScopeItem>Which deposit a withdrawal came from</ScopeItem>
-                <ScopeItem>The plan itself — only its hash is stored</ScopeItem>
+                <ScopeItem>Your order's terms — only a fingerprint of them is stored</ScopeItem>
               </ul>
             </div>
             <div className="panel-flat p-7">
               <p className="tag">[ Public ]</p>
               <ul className="mt-5 space-y-3 text-[13px] leading-relaxed text-text-secondary">
-                <ScopeItem>Each slice&apos;s Ekubo swap: pool, amounts, timing</ScopeItem>
+                <ScopeItem>Each fill&apos;s swap on Ekubo: pool, amounts, timing</ScopeItem>
                 <ScopeItem>Shielding: your address, the token, the amount</ScopeItem>
                 <ScopeItem>Withdrawal destination and amount</ScopeItem>
-                <ScopeItem>Every fill&apos;s SliceFilled event, under the salted plan hash</ScopeItem>
+                <ScopeItem>That some order made a fill, under its anonymous id</ScopeItem>
               </ul>
             </div>
           </div>

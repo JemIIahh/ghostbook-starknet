@@ -3,19 +3,18 @@
 /**
  * Orders — private limit orders and private TWAP/DCA.
  *
- * A plan commits the terms once (limit price, slice size, pacing, budget, expiry). Each fill is one
- * private transaction: withdraw a slice to the anonymizer, open a note for the output, invoke the
- * anonymizer. The contract enforces the terms, so a fill can never deviate from what was committed —
- * and progress is read back from on-chain state keyed by the salted plan hash.
+ * The plan is the product: limit price, chunk size, pacing, budget, expiry, committed once and
+ * enforced by the contract on every fill. This page's job is to make that legible and to refuse
+ * anything that would revert on-chain — an unfundable plan, a price the market can't meet, a chunk
+ * that arrives too early.
  *
- * Plan terms live in this browser: the contract stores only the hash, so export them if you care
- * about filling the rest of an order later.
+ * Plan terms live in this browser (the contract stores only the hash), so exporting them matters.
  */
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Download, RefreshCw, Trash2 } from "lucide-react";
+import { AlertTriangle, Download, Info, RefreshCw, Trash2 } from "lucide-react";
 import GhostPageShell from "@/components/GhostPageShell";
-import TokenIcon from "@/components/TokenIcon";
+import StepGuide, { type Step } from "@/components/StepGuide";
 import ConnectButton from "@/components/wallet/ConnectButton";
 import { useWallet } from "@/context/WalletContext";
 import { useToast } from "@/context/ToastContext";
@@ -26,7 +25,7 @@ import {
   tokenByAddress,
   type TokenInfo,
 } from "@/lib/starknet/config";
-import { findBestPool, type Quote } from "@/lib/starknet/quote";
+import { findBestPool, quoteForPlanPool, type Quote } from "@/lib/starknet/quote";
 import {
   bpsFromFee,
   buildPlan,
@@ -47,43 +46,43 @@ import {
 } from "@/lib/strk20/anonymizer";
 import { exportPlans, plansWithTerms, removePlan, savePlan } from "@/lib/strk20/store";
 import { useStrk20Submit } from "@/lib/strk20/useStrk20Submit";
+import { useShieldedBalances } from "@/lib/strk20/useShieldedBalances";
 import { friendlyError } from "@/lib/errors";
+import { formatDuration, formatPercentDelta, formatPrice, formatToken, shortHex } from "@/lib/format";
 
 type PlanRow = {
   hash: string;
-  label: string;
   createdAt: number;
   plan: OrderPlan;
   tokenIn: TokenInfo;
   tokenOut: TokenInfo;
   state: PlanState;
+  /** Live market price for one chunk, or null when the pool can't price it. */
+  marketPrice: number | null;
 };
+
+/** Limit presets, expressed the way traders think: relative to the current market. */
+const PRESETS = [
+  { label: "Market", premium: 0 },
+  { label: "+1%", premium: 1 },
+  { label: "+2%", premium: 2 },
+  { label: "+5%", premium: 5 },
+];
 
 function tokenOr(address: string): TokenInfo {
   return tokenByAddress(address) ?? { symbol: "?", name: "Unknown", address, decimals: 18 };
-}
-
-function countdown(seconds: number): string {
-  if (seconds <= 0) return "ready";
-  if (seconds < 60) return `${seconds}s`;
-  if (seconds < 3600) return `${Math.ceil(seconds / 60)}m`;
-  return `${Math.ceil(seconds / 3600)}h`;
-}
-
-function trimNumber(value: number, digits = 6): string {
-  if (!Number.isFinite(value)) return "—";
-  return String(Number(value.toPrecision(digits)));
 }
 
 export default function OrdersPage() {
   const { isConnected, address, network, isSupportedNetwork } = useWallet();
   const { showSuccess, showError, showInfo } = useToast();
   const { submit, isBusy, status, txHash } = useStrk20Submit();
+  const { balanceOf, hasAnything, refresh: refreshBalances } = useShieldedBalances();
 
   const [sellSymbol, setSellSymbol] = useState("STRK");
   const [buySymbol, setBuySymbol] = useState("ETH");
   const [total, setTotal] = useState("10");
-  const [slice, setSlice] = useState("2");
+  const [chunks, setChunks] = useState("5");
   const [intervalMinutes, setIntervalMinutes] = useState("15");
   const [expiryHours, setExpiryHours] = useState("24");
   const [limitPrice, setLimitPrice] = useState("");
@@ -92,6 +91,7 @@ export default function OrdersPage() {
   const [rows, setRows] = useState<PlanRow[]>([]);
   const [refreshing, setRefreshing] = useState(false);
   const [fillingHash, setFillingHash] = useState<string | null>(null);
+  const [showDetails, setShowDetails] = useState<string | null>(null);
 
   const sellToken = useMemo(
     () => TOKENS.find((t) => t.symbol === sellSymbol) ?? TOKENS[0],
@@ -101,10 +101,15 @@ export default function OrdersPage() {
   const anonymizer = network.anonymizer;
   const deployed = Boolean(anonymizer);
 
-  /** Quote the slice through Ekubo so the limit price starts from a real market price. */
+  const totalNumber = Number(total) || 0;
+  const chunkCount = Math.max(1, Math.floor(Number(chunks) || 1));
+  const chunkSize = totalNumber > 0 ? totalNumber / chunkCount : 0;
+  const shielded = fromSmallestUnit(balanceOf(sellToken.address), sellToken.decimals);
+  const underfunded = totalNumber > shielded;
+
+  /** Quote one chunk through Ekubo so the limit starts from a real market price. */
   const refreshQuote = useCallback(async () => {
-    const sliceAmount = Number(slice);
-    if (sellToken.symbol === buyToken.symbol || !Number.isFinite(sliceAmount) || sliceAmount <= 0) {
+    if (sellToken.symbol === buyToken.symbol || chunkSize <= 0) {
       setQuote(null);
       return;
     }
@@ -115,22 +120,22 @@ export default function OrdersPage() {
         network.ekuboRouter,
         sellToken.address,
         buyToken.address,
-        toSmallestUnit(sliceAmount, sellToken.decimals),
+        toSmallestUnit(chunkSize, sellToken.decimals),
         sellToken.decimals,
         buyToken.decimals,
       );
       setQuote(best);
-      if (best && !limitPrice) setLimitPrice(trimNumber(best.price));
+      if (best && !limitPrice) setLimitPrice(formatPrice(best.price));
     } finally {
       setQuoting(false);
     }
-  }, [network, sellToken, buyToken, slice, limitPrice]);
+  }, [network, sellToken, buyToken, chunkSize, limitPrice]);
 
   useEffect(() => {
     void refreshQuote();
-    // Re-quote on pair / slice changes only, not on limit-price keystrokes.
+    // Re-quote when the pair or chunk size changes, not on limit-price keystrokes.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [network.key, sellToken.address, buyToken.address, slice]);
+  }, [network.key, sellToken.address, buyToken.address, chunkSize]);
 
   const loadRows = useCallback(async () => {
     if (!address) {
@@ -142,22 +147,43 @@ export default function OrdersPage() {
       const provider = providerFor(network);
       const next = await Promise.all(
         plansWithTerms(network.key, address).map(async ({ stored, plan }) => {
+          const tokenIn = tokenOr(plan.tokenIn);
+          const tokenOut = tokenOr(tokenOutOf(plan));
+
           let state = EMPTY_PLAN_STATE;
           if (deployed) {
             try {
               state = await readPlanState(provider, anonymizer, plan);
             } catch {
-              /* unreachable node or never-filled plan */
+              /* never filled, or the node is unreachable */
             }
           }
+
+          // Live price for the next chunk, so the card can say whether a fill would succeed.
+          let marketPrice: number | null = null;
+          try {
+            const live = await quoteForPlanPool(
+              provider,
+              network.ekuboRouter,
+              plan.poolKey,
+              plan.tokenIn,
+              plan.maxSlice,
+              tokenIn.decimals,
+              tokenOut.decimals,
+            );
+            marketPrice = live?.price ?? null;
+          } catch {
+            marketPrice = null;
+          }
+
           return {
             hash: stored.hash,
-            label: stored.label,
             createdAt: stored.createdAt,
             plan,
-            tokenIn: tokenOr(plan.tokenIn),
-            tokenOut: tokenOr(tokenOutOf(plan)),
+            tokenIn,
+            tokenOut,
             state,
+            marketPrice,
           } satisfies PlanRow;
         }),
       );
@@ -171,6 +197,11 @@ export default function OrdersPage() {
     void loadRows();
   }, [loadRows]);
 
+  const applyPreset = (premium: number) => {
+    if (!quote) return;
+    setLimitPrice(formatPrice(quote.price * (1 + premium / 100)));
+  };
+
   const createPlan = () => {
     if (!address) return;
     if (sellToken.symbol === buyToken.symbol) {
@@ -178,18 +209,22 @@ export default function OrdersPage() {
       return;
     }
     if (!quote) {
-      showError("No Ekubo pool priced this pair — try another pair or slice size.");
+      showError("No Ekubo pool can price this pair right now. Try another pair.");
       return;
     }
     const price = Number(limitPrice);
-    const totalAmount = Number(total);
-    const sliceAmount = Number(slice);
     if (!Number.isFinite(price) || price <= 0) {
       showError("Set a limit price.");
       return;
     }
-    if (!(totalAmount > 0) || !(sliceAmount > 0) || sliceAmount > totalAmount) {
-      showError("Slice must be above zero and no larger than the total.");
+    if (totalNumber <= 0) {
+      showError(`Enter how much ${sellToken.symbol} to sell.`);
+      return;
+    }
+    if (underfunded) {
+      showError(
+        `You have ${formatToken(shielded)} ${sellToken.symbol} shielded. Shield more, or lower the amount.`,
+      );
       return;
     }
 
@@ -199,42 +234,25 @@ export default function OrdersPage() {
       decimalsIn: sellToken.decimals,
       decimalsOut: buyToken.decimals,
       poolKey: quote.poolKey,
-      totalAmount,
-      sliceAmount,
+      totalAmount: totalNumber,
+      sliceAmount: chunkSize,
       intervalMinutes: Number(intervalMinutes) || 0,
       expiryHours: Number(expiryHours) || 24,
       limitPrice: price,
     });
 
-    savePlan(
-      network.key,
-      address,
-      plan,
-      `${sellToken.symbol}→${buyToken.symbol} @ ${trimNumber(price)}`,
-    );
-    showSuccess("Plan committed. Fill a slice whenever the price allows.");
+    savePlan(network.key, address, plan, `${sellToken.symbol}→${buyToken.symbol}`);
+    showSuccess("Order created. Fill the first chunk when the price is right.");
     void loadRows();
   };
 
-  const fillSlice = async (row: PlanRow) => {
-    if (!address) return;
-    if (!deployed) {
-      showError("No GhostBook anonymizer configured for this network yet.");
-      return;
-    }
+  const fillChunk = async (row: PlanRow) => {
+    if (!address || !deployed) return;
     const progress = planProgress(row.plan, row.state, Math.floor(Date.now() / 1000));
-    if (progress.expired) {
-      showError("This plan has expired.");
-      return;
-    }
-    if (progress.exhausted) {
-      showError("This plan is fully filled.");
-      return;
-    }
     const amountIn = progress.remaining < row.plan.maxSlice ? progress.remaining : row.plan.maxSlice;
 
     setFillingHash(row.hash);
-    showInfo("Confirm in your wallet. The fill reverts unless your limit price is met.");
+    showInfo("Confirm in your wallet. If the price slips below your limit, nothing moves.");
     const result = await submit(
       fillSliceActions({
         plan: row.plan,
@@ -250,10 +268,10 @@ export default function OrdersPage() {
       const event = parseSliceFilled(result.receipt, anonymizer);
       showSuccess(
         event
-          ? `Filled ${fromSmallestUnit(event.amountIn, row.tokenIn.decimals)} ${row.tokenIn.symbol} → ${fromSmallestUnit(event.amountOut, row.tokenOut.decimals)} ${row.tokenOut.symbol}`
-          : "Confirmed, but no SliceFilled event was found in the receipt.",
+          ? `Bought ${formatToken(fromSmallestUnit(event.amountOut, row.tokenOut.decimals))} ${row.tokenOut.symbol} for ${formatToken(fromSmallestUnit(event.amountIn, row.tokenIn.decimals))} ${row.tokenIn.symbol}.`
+          : "Confirmed, but no fill event was found in the receipt.",
       );
-      void loadRows();
+      void Promise.all([loadRows(), refreshBalances()]);
     } else if (result.error) {
       showError(friendlyError(result.error));
     }
@@ -265,29 +283,44 @@ export default function OrdersPage() {
     const url = URL.createObjectURL(blob);
     const link = document.createElement("a");
     link.href = url;
-    link.download = `ghostbook-plans-${address.slice(0, 8)}.json`;
+    link.download = `ghostbook-orders-${address.slice(0, 8)}.json`;
     link.click();
     URL.revokeObjectURL(url);
   };
 
   const now = Math.floor(Date.now() / 1000);
 
+  const steps: Step[] = [
+    {
+      label: "Connect a wallet",
+      state: isConnected ? "done" : "current",
+      hint: "A Starknet wallet with STRK20 support, on Mainnet.",
+    },
+    {
+      label: "Shield what you'll sell",
+      state: !isConnected ? "todo" : hasAnything ? "done" : "current",
+      hint: "Orders spend your shielded balance, not your public one.",
+      href: "/private",
+    },
+    {
+      label: "Create an order",
+      state: !isConnected || !hasAnything ? "todo" : rows.length ? "done" : "current",
+      hint: "Set a price you'd be happy to sell at, then fill it in chunks.",
+    },
+  ];
+
   return (
     <GhostPageShell
       eyebrow="Orders"
-      title="Commit terms. Fill in slices."
-      subtitle="Your plan is hashed with a secret salt and enforced by the anonymizer on every fill: limit price, slice cap, total budget, pacing, expiry."
+      title="Sell at your price, in chunks"
+      subtitle="Set the terms once. Every fill is checked against them on-chain, so a chunk can only execute at your price, at your size, on your schedule."
       maxWidth="lg"
       headerRight={
-        isConnected ? (
+        isConnected && rows.length ? (
           <div className="flex items-center gap-2">
-            <button
-              onClick={download}
-              className="btn btn-ghost !py-2 !px-3.5"
-              title="Plan terms exist only in this browser"
-            >
+            <button onClick={download} className="btn btn-ghost !py-2 !px-3.5" title="Back up your orders">
               <Download className="w-3.5 h-3.5" />
-              Export
+              Back up
             </button>
             <button
               onClick={() => void loadRows()}
@@ -295,41 +328,32 @@ export default function OrdersPage() {
               className="btn btn-ghost !py-2 !px-3.5"
             >
               <RefreshCw className={`w-3.5 h-3.5 ${refreshing ? "animate-spin" : ""}`} />
-              Sync
+              Refresh
             </button>
           </div>
         ) : null
       }
     >
+      <StepGuide steps={steps} />
+
       {!deployed ? (
-        <div className="mb-4 border border-warning/40 bg-warning/[0.07] px-5 py-4">
-          <p className="tag text-warning">[ Not deployed ]</p>
-          <p className="mt-2 text-[12px] leading-relaxed text-text-secondary">
-            No anonymizer configured for {network.label}. Deploy it with{" "}
-            <code className="mono text-primary">scripts/deploy-anonymizer.sh</code> and set{" "}
-            <code className="mono text-primary">NEXT_PUBLIC_ANONYMIZER_MAINNET</code>. You can still
-            build plans — fills need the contract.
+        <div className="mt-4 flex gap-3 border border-warning/40 bg-warning/[0.06] px-5 py-4">
+          <AlertTriangle className="w-4 h-4 text-warning shrink-0 mt-0.5" />
+          <p className="text-[13px] leading-relaxed text-text-secondary">
+            The GhostBook contract isn&apos;t deployed on {network.label} yet, so orders can be
+            created but not filled.
           </p>
         </div>
       ) : null}
 
       {/* ── Builder ──────────────────────────────────────────────────────── */}
-      <section className="panel p-6 sm:p-8">
-        <div className="flex items-baseline justify-between gap-4 flex-wrap">
-          <p className="tag">[ New plan ]</p>
-          <p className="mono text-[10px] tracking-[0.18em] uppercase text-text-tertiary">
-            {quoting
-              ? "Quoting Ekubo…"
-              : quote
-                ? `Market ${trimNumber(quote.price)} · ${bpsFromFee(quote.poolKey.fee)}bps pool`
-                : "No pool priced"}
-          </p>
-        </div>
+      <section className="mt-4 panel p-6 sm:p-8">
+        <h2 className="text-[17px] font-medium">New order</h2>
 
-        <div className="mt-6 grid md:grid-cols-[1fr_auto_1fr] gap-4 md:gap-5 items-end">
+        <div className="mt-6 grid sm:grid-cols-2 gap-5">
           <div>
-            <p className="label">Sell</p>
-            <div className="mt-2.5 flex flex-wrap gap-2">
+            <label className="label">Sell</label>
+            <div className="mt-2 flex flex-wrap gap-2">
               {TOKENS.map((t) => (
                 <button
                   key={t.address}
@@ -342,12 +366,9 @@ export default function OrdersPage() {
               ))}
             </div>
           </div>
-          <span className="hidden md:block text-primary pb-2.5" aria-hidden>
-            →
-          </span>
           <div>
-            <p className="label">Buy</p>
-            <div className="mt-2.5 flex flex-wrap gap-2">
+            <label className="label">Buy</label>
+            <div className="mt-2 flex flex-wrap gap-2">
               {TOKENS.map((t) => (
                 <button
                   key={t.address}
@@ -362,191 +383,286 @@ export default function OrdersPage() {
           </div>
         </div>
 
-        <div className="mt-7">
-          <div className="flex items-baseline justify-between">
-            <p className="label">
-              Limit — minimum {buyToken.symbol} per {sellToken.symbol}
-            </p>
-            <button
-              onClick={() => void refreshQuote()}
-              className="mono text-[10px] tracking-[0.16em] uppercase text-primary hover:underline"
-            >
-              re-quote
-            </button>
+        <div className="mt-6">
+          <div className="flex items-baseline justify-between gap-3">
+            <label className="label">Amount to sell</label>
+            {isConnected ? (
+              <button
+                onClick={() => setTotal(String(shielded))}
+                className="mono text-[11px] text-primary hover:underline disabled:text-text-ghost"
+                disabled={shielded <= 0}
+              >
+                {formatToken(shielded)} {sellToken.symbol} available
+              </button>
+            ) : null}
           </div>
-          <input
-            type="number"
-            min="0"
-            step="any"
-            value={limitPrice}
-            onChange={(event) => setLimitPrice(event.target.value)}
-            placeholder="0.00"
-            className="mt-2.5 w-full bg-[#101010] border border-border focus:border-primary transition-colors px-4 py-4 display text-[clamp(26px,3vw,38px)] tabular-nums outline-none"
-          />
-          {quote ? (
-            <p className="mt-2 text-[11px] text-text-tertiary">
-              A slice of {slice} {sellToken.symbol} currently quotes{" "}
-              {trimNumber(fromSmallestUnit(quote.amountOut, buyToken.decimals))} {buyToken.symbol}.
-              Set your limit above market to wait for a better price.
+          <div className="mt-2 flex items-stretch border border-border focus-within:border-primary transition-colors">
+            <input
+              type="number"
+              min="0"
+              step="any"
+              value={total}
+              onChange={(event) => setTotal(event.target.value)}
+              placeholder="0.00"
+              className="flex-1 bg-[#101010] px-4 py-3.5 text-[22px] tabular-nums outline-none"
+            />
+            <span className="grid place-items-center px-4 bg-surface-2 mono text-[12px] text-text-secondary border-l border-border">
+              {sellToken.symbol}
+            </span>
+          </div>
+          {underfunded && isConnected ? (
+            <p className="mt-2 text-[12px] text-warning">
+              More than your shielded balance. Shield more {sellToken.symbol} first.
             </p>
           ) : null}
         </div>
 
-        <div className="mt-7 grid grid-cols-2 lg:grid-cols-4 gap-4">
-          <Field label={`Total ${sellToken.symbol}`} value={total} onChange={setTotal} />
-          <Field label={`Slice ${sellToken.symbol}`} value={slice} onChange={setSlice} />
-          <Field label="Interval (min)" value={intervalMinutes} onChange={setIntervalMinutes} />
-          <Field label="Expires (h)" value={expiryHours} onChange={setExpiryHours} />
+        <div className="mt-6">
+          <div className="flex items-baseline justify-between gap-3 flex-wrap">
+            <label className="label">Minimum price</label>
+            <span className="hint">
+              {quoting
+                ? "Checking the market…"
+                : quote
+                  ? `Market: ${formatPrice(quote.price)} ${buyToken.symbol} per ${sellToken.symbol}`
+                  : "No pool can price this pair"}
+            </span>
+          </div>
+          <div className="mt-2 flex items-stretch border border-border focus-within:border-primary transition-colors">
+            <input
+              type="number"
+              min="0"
+              step="any"
+              value={limitPrice}
+              onChange={(event) => setLimitPrice(event.target.value)}
+              placeholder="0.00"
+              className="flex-1 bg-[#101010] px-4 py-3.5 text-[22px] tabular-nums outline-none"
+            />
+            <span className="grid place-items-center px-4 bg-surface-2 mono text-[12px] text-text-secondary border-l border-border whitespace-nowrap">
+              {buyToken.symbol} / {sellToken.symbol}
+            </span>
+          </div>
+          <div className="mt-2.5 flex flex-wrap items-center gap-2">
+            {PRESETS.map((preset) => (
+              <button
+                key={preset.label}
+                onClick={() => applyPreset(preset.premium)}
+                disabled={!quote}
+                className="chip !py-1.5 !px-2.5 disabled:opacity-40"
+              >
+                {preset.label}
+              </button>
+            ))}
+            {quote && Number(limitPrice) > 0 ? (
+              <span className="hint">
+                {formatPercentDelta(Number(limitPrice), quote.price)} vs market
+              </span>
+            ) : null}
+          </div>
         </div>
 
-        <div className="mt-7 pt-6 border-t border-line-subtle flex items-center justify-between gap-4 flex-wrap">
-          <p className="text-[11px] leading-relaxed text-text-tertiary max-w-[52ch]">
-            {Number(total) > 0 && Number(slice) > 0
-              ? `${Math.ceil(Number(total) / Number(slice))} slices, at least ${intervalMinutes || 0} minutes apart.`
-              : "Set a total and slice size."}
-          </p>
+        <details className="mt-6 border-t border-line-subtle pt-5">
+          <summary className="label cursor-pointer select-none">Split and timing</summary>
+          <div className="mt-4 grid grid-cols-3 gap-4">
+            <Field label="Chunks" value={chunks} onChange={setChunks} hint="Fills to split it into" />
+            <Field
+              label="Wait between"
+              value={intervalMinutes}
+              onChange={setIntervalMinutes}
+              hint="Minutes, enforced"
+            />
+            <Field label="Expires in" value={expiryHours} onChange={setExpiryHours} hint="Hours" />
+          </div>
+        </details>
+
+        {/* Plain-English restatement of exactly what the contract will enforce. */}
+        <div className="mt-6 border border-border bg-[#101010] px-5 py-4">
+          <div className="flex gap-2.5">
+            <Info className="w-3.5 h-3.5 text-primary shrink-0 mt-1" />
+            <p className="text-[13px] leading-relaxed">
+              {totalNumber > 0 && Number(limitPrice) > 0 ? (
+                <>
+                  Sell <strong>{formatToken(totalNumber)} {sellToken.symbol}</strong> in{" "}
+                  <strong>{chunkCount}</strong> {chunkCount === 1 ? "fill" : "fills"} of{" "}
+                  {formatToken(chunkSize)} {sellToken.symbol}, never below{" "}
+                  <strong>
+                    {formatPrice(Number(limitPrice))} {buyToken.symbol}
+                  </strong>{" "}
+                  each, at most one every {intervalMinutes || 0} min, expiring in{" "}
+                  {expiryHours || 24} h. Total if every fill lands at your price:{" "}
+                  <strong>
+                    {formatToken(totalNumber * Number(limitPrice))} {buyToken.symbol}
+                  </strong>
+                  .
+                </>
+              ) : (
+                "Set an amount and a minimum price to see what this order will do."
+              )}
+            </p>
+          </div>
+        </div>
+
+        <div className="mt-6">
           {!isConnected ? (
             <ConnectButton />
           ) : !isSupportedNetwork ? (
-            <p className="mono text-[11px] tracking-[0.12em] uppercase text-warning">
-              Switch to Starknet Mainnet
-            </p>
+            <p className="text-[13px] text-warning">Switch your wallet to Starknet Mainnet.</p>
           ) : (
-            <button onClick={createPlan} className="btn btn-orange">
-              Commit plan →
+            <button
+              onClick={createPlan}
+              disabled={underfunded || !quote || totalNumber <= 0 || Number(limitPrice) <= 0}
+              className="btn btn-orange w-full sm:w-auto"
+            >
+              Create order
             </button>
           )}
         </div>
       </section>
 
-      {/* ── Plans ────────────────────────────────────────────────────────── */}
-      <section className="mt-4 space-y-3">
-        {rows.length === 0 ? (
-          <div className="panel-flat px-6 py-14 text-center">
-            <p className="mono text-[11px] tracking-[0.22em] uppercase text-text-ghost">
-              No plans yet
-            </p>
-            <p className="mt-3 text-[13px] text-text-secondary max-w-[46ch] mx-auto leading-relaxed">
-              A plan is committed in your browser and enforced on-chain the moment you fill it.
-            </p>
-          </div>
-        ) : (
-          rows.map((row) => {
-            const progress = planProgress(row.plan, row.state, now);
-            const waitFor = Math.max(0, progress.nextFillAt - now);
-            const nextSlice =
-              progress.remaining < row.plan.maxSlice ? progress.remaining : row.plan.maxSlice;
-            const pct = Number((row.state.filled * 1000n) / (row.plan.totalAmount || 1n)) / 10;
-            const price = limitPriceOf(row.plan, row.tokenIn.decimals, row.tokenOut.decimals);
-            const blocked = progress.expired || progress.exhausted || waitFor > 0;
-            const statusLabel = progress.expired
-              ? "Expired"
-              : progress.exhausted
-                ? "Complete"
-                : waitFor > 0
-                  ? `Paced · ${countdown(waitFor)}`
-                  : "Fillable";
+      {/* ── Open orders ──────────────────────────────────────────────────── */}
+      {rows.length ? (
+        <section className="mt-8">
+          <h2 className="text-[17px] font-medium">Your orders</h2>
 
-            return (
-              <article key={row.hash} className="panel p-6 sm:p-7">
-                <div className="flex items-start justify-between gap-4 flex-wrap">
-                  <div>
-                    <div className="flex items-center gap-2.5">
-                      <TokenIcon symbol={row.tokenIn.symbol} size="sm" showLabel />
-                      <span className="text-primary" aria-hidden>
-                        →
-                      </span>
-                      <TokenIcon symbol={row.tokenOut.symbol} size="sm" showLabel />
+          <div className="mt-4 space-y-3">
+            {rows.map((row) => {
+              const progress = planProgress(row.plan, row.state, now);
+              const waitFor = Math.max(0, progress.nextFillAt - now);
+              const nextChunk =
+                progress.remaining < row.plan.maxSlice ? progress.remaining : row.plan.maxSlice;
+              const pct = Number((row.state.filled * 1000n) / (row.plan.totalAmount || 1n)) / 10;
+              const limit = limitPriceOf(row.plan, row.tokenIn.decimals, row.tokenOut.decimals);
+              const priceMet = row.marketPrice !== null && row.marketPrice >= limit;
+
+              const reason = progress.expired
+                ? "Expired"
+                : progress.exhausted
+                  ? "Filled"
+                  : waitFor > 0
+                    ? `Next fill in ${formatDuration(waitFor)}`
+                    : row.marketPrice === null
+                      ? "No price available"
+                      : priceMet
+                        ? "Price met — ready to fill"
+                        : `Waiting for ${formatPrice(limit)} (market ${formatPrice(row.marketPrice)})`;
+
+              const canFill =
+                deployed && !progress.expired && !progress.exhausted && waitFor === 0 && priceMet;
+
+              return (
+                <article key={row.hash} className="panel-flat p-5 sm:p-6">
+                  <div className="flex items-start justify-between gap-4 flex-wrap">
+                    <div>
+                      <p className="text-[16px] font-medium">
+                        Sell {formatToken(fromSmallestUnit(row.plan.totalAmount, row.tokenIn.decimals))}{" "}
+                        {row.tokenIn.symbol} for {row.tokenOut.symbol}
+                      </p>
+                      <p className="mt-1.5 text-[13px] text-text-secondary">
+                        at {formatPrice(limit)} {row.tokenOut.symbol} or better ·{" "}
+                        {formatToken(fromSmallestUnit(row.plan.maxSlice, row.tokenIn.decimals))}{" "}
+                        {row.tokenIn.symbol} per fill
+                      </p>
                     </div>
-                    <p className="mt-2.5 mono text-[10px] text-text-ghost truncate max-w-[46ch]">
-                      {row.hash}
-                    </p>
-                  </div>
-
-                  <div className="flex items-center gap-3">
-                    <span
-                      className={`mono text-[10px] tracking-[0.18em] uppercase px-2.5 py-1 border rounded-full ${
-                        statusLabel === "Fillable"
-                          ? "text-primary border-primary/50"
-                          : "text-text-tertiary border-border"
-                      }`}
-                    >
-                      {statusLabel}
-                    </span>
                     <button
                       onClick={() => {
-                        removePlan(network.key, address!, row.hash);
+                        if (!address) return;
+                        removePlan(network.key, address, row.hash);
                         void loadRows();
                       }}
                       className="p-1.5 text-text-ghost hover:text-danger transition-colors"
-                      title="Forget this plan — its remaining budget becomes unfillable"
+                      title="Remove — any unfilled amount can no longer be filled"
                     >
                       <Trash2 className="w-3.5 h-3.5" />
                     </button>
                   </div>
-                </div>
 
-                <div className="mt-6 grid grid-cols-2 sm:grid-cols-4 gap-px bg-border border border-border">
-                  <Cell label="Limit" value={trimNumber(price)} note={`${row.tokenOut.symbol}/${row.tokenIn.symbol}`} />
-                  <Cell
-                    label="Filled"
-                    value={`${pct.toFixed(pct < 10 ? 1 : 0)}%`}
-                    note={`${fromSmallestUnit(row.state.filled, row.tokenIn.decimals)} of ${fromSmallestUnit(row.plan.totalAmount, row.tokenIn.decimals)}`}
-                  />
-                  <Cell
-                    label="Received"
-                    value={trimNumber(fromSmallestUnit(row.state.received, row.tokenOut.decimals))}
-                    note={row.tokenOut.symbol}
-                  />
-                  <Cell label="Fills" value={String(row.state.fills)} note="slices settled" />
-                </div>
-
-                <div className="meter mt-5">
-                  <span style={{ width: `${Math.min(100, pct)}%` }} />
-                </div>
-
-                <div className="mt-5 flex items-end justify-between gap-4 flex-wrap">
-                  <p className="text-[12px] leading-relaxed text-text-secondary max-w-[52ch]">
-                    {progress.expired ? (
-                      "Past expiry — the contract refuses further fills."
-                    ) : progress.exhausted ? (
-                      "Budget spent. Every slice settled into your notes."
-                    ) : waitFor > 0 ? (
-                      `Pacing holds the next slice for ${countdown(waitFor)}.`
-                    ) : (
+                  <div className="mt-5 flex items-center gap-3">
+                    <div className="meter flex-1">
+                      <span style={{ width: `${Math.min(100, pct)}%` }} />
+                    </div>
+                    <span className="mono text-[11px] text-text-secondary tabular-nums shrink-0">
+                      {pct.toFixed(pct > 0 && pct < 10 ? 1 : 0)}%
+                    </span>
+                  </div>
+                  <p className="mt-2 text-[12px] text-text-tertiary">
+                    {formatToken(fromSmallestUnit(row.state.filled, row.tokenIn.decimals))} of{" "}
+                    {formatToken(fromSmallestUnit(row.plan.totalAmount, row.tokenIn.decimals))}{" "}
+                    {row.tokenIn.symbol} sold
+                    {row.state.received > 0n ? (
                       <>
-                        Next slice{" "}
-                        <span className="text-foreground">
-                          {fromSmallestUnit(nextSlice, row.tokenIn.decimals)} {row.tokenIn.symbol}
-                        </span>{" "}
-                        needs at least{" "}
-                        <span className="text-foreground">
-                          {trimNumber(
-                            fromSmallestUnit(requiredOut(row.plan, nextSlice), row.tokenOut.decimals),
-                          )}{" "}
-                          {row.tokenOut.symbol}
-                        </span>
-                        .
+                        {" · "}
+                        {formatToken(fromSmallestUnit(row.state.received, row.tokenOut.decimals))}{" "}
+                        {row.tokenOut.symbol} received
                       </>
-                    )}
+                    ) : null}
                   </p>
+
+                  <div className="mt-5 pt-5 border-t border-line-subtle flex items-center justify-between gap-4 flex-wrap">
+                    <p className="text-[13px] flex items-center gap-2">
+                      <span
+                        className={`w-1.5 h-1.5 rounded-full shrink-0 ${
+                          canFill
+                            ? "bg-primary pulse-dot"
+                            : progress.expired || progress.exhausted
+                              ? "bg-text-ghost"
+                              : "bg-warning"
+                        }`}
+                      />
+                      <span className={canFill ? "text-foreground" : "text-text-secondary"}>
+                        {reason}
+                      </span>
+                    </p>
+                    <button
+                      onClick={() => void fillChunk(row)}
+                      disabled={!canFill || isBusy}
+                      className="btn btn-orange"
+                      title={canFill ? undefined : reason}
+                    >
+                      {fillingHash === row.hash
+                        ? status === "signing"
+                          ? "Waiting for wallet…"
+                          : "Filling…"
+                        : `Fill ${formatToken(fromSmallestUnit(nextChunk, row.tokenIn.decimals))} ${row.tokenIn.symbol}`}
+                    </button>
+                  </div>
+
                   <button
-                    onClick={() => void fillSlice(row)}
-                    disabled={blocked || isBusy || !deployed}
-                    className="btn btn-orange"
+                    onClick={() => setShowDetails(showDetails === row.hash ? null : row.hash)}
+                    className="mt-4 hint hover:text-text-secondary transition-colors"
                   >
-                    {fillingHash === row.hash
-                      ? status === "signing"
-                        ? "Wallet…"
-                        : "Proving…"
-                      : "Fill slice →"}
+                    {showDetails === row.hash ? "Hide details" : "Details"}
                   </button>
-                </div>
-              </article>
-            );
-          })
-        )}
-      </section>
+                  {showDetails === row.hash ? (
+                    <dl className="mt-3 grid sm:grid-cols-2 gap-x-6 gap-y-2 text-[12px]">
+                      <Detail label="Fills so far" value={String(row.state.fills)} />
+                      <Detail
+                        label="Minimum per fill"
+                        value={`${formatToken(fromSmallestUnit(requiredOut(row.plan, nextChunk), row.tokenOut.decimals))} ${row.tokenOut.symbol}`}
+                      />
+                      <Detail
+                        label="Wait between fills"
+                        value={formatDuration(Number(row.plan.minInterval))}
+                      />
+                      <Detail
+                        label="Expires"
+                        value={new Date(Number(row.plan.expiry) * 1000).toLocaleString()}
+                      />
+                      <Detail label="Ekubo pool" value={`${bpsFromFee(row.plan.poolKey.fee)} bps`} />
+                      <Detail label="On-chain id" value={shortHex(row.hash, 10, 6)} />
+                    </dl>
+                  ) : null}
+                </article>
+              );
+            })}
+          </div>
+
+          <p className="mt-5 hint">
+            Orders are stored in this browser only — the contract keeps just their id. Use{" "}
+            <strong className="text-text-secondary">Back up</strong> if you clear site data or switch
+            device, or the unfilled amount becomes unreachable.
+          </p>
+        </section>
+      ) : null}
 
       {txHash ? (
         <a
@@ -555,17 +671,9 @@ export default function OrdersPage() {
           rel="noreferrer"
           className="mt-5 block mono text-[11px] text-primary hover:underline truncate"
         >
-          {txHash} ↗
+          View transaction {shortHex(txHash, 10, 6)} ↗
         </a>
       ) : null}
-
-      <p className="mt-8 text-[11px] leading-relaxed text-text-tertiary max-w-[86ch]">
-        Each fill is one private transaction: the pool withdraws a slice to the anonymizer, opens a
-        note for the output, and invokes the contract, which swaps on Ekubo only if the limit price,
-        slice cap, pacing and expiry all hold. The Ekubo leg is a public swap — slice amounts and
-        timing are visible. What stays private is who is trading and the shape of the parent order.
-        Plan terms, including the salt, live only in this browser: export them.
-      </p>
     </GhostPageShell>
   );
 }
@@ -574,34 +682,34 @@ function Field({
   label,
   value,
   onChange,
+  hint,
 }: {
   label: string;
   value: string;
   onChange: (value: string) => void;
+  hint?: string;
 }) {
   return (
     <div>
-      <p className="label">{label}</p>
+      <label className="label">{label}</label>
       <input
         type="number"
         min="0"
         step="any"
         value={value}
         onChange={(event) => onChange(event.target.value)}
-        className="field mono text-[14px] mt-2.5"
+        className="field mono text-[14px] mt-2"
       />
+      {hint ? <p className="mt-1.5 hint">{hint}</p> : null}
     </div>
   );
 }
 
-function Cell({ label, value, note }: { label: string; value: string; note: string }) {
+function Detail({ label, value }: { label: string; value: string }) {
   return (
-    <div className="bg-background px-4 py-4">
-      <p className="label">{label}</p>
-      <p className="display mt-2 text-[clamp(18px,2vw,26px)] tabular-nums">{value}</p>
-      <p className="mt-1 mono text-[10px] tracking-[0.12em] uppercase text-text-ghost truncate">
-        {note}
-      </p>
+    <div className="flex justify-between gap-4 border-b border-line-subtle pb-1.5">
+      <dt className="text-text-tertiary">{label}</dt>
+      <dd className="mono tabular-nums text-text-secondary">{value}</dd>
     </div>
   );
 }
