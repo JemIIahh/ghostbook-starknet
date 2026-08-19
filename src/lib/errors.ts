@@ -8,6 +8,8 @@
 
 /** `GhostBookAnonymizer` and Ekubo assertion strings, mapped to plain language. */
 const CONTRACT_ERRORS: Record<string, string> = {
+  NOT_REGISTERED:
+    "Your wallet hasn't registered a viewing key with the STRK20 pool yet. Set up your private balance in the wallet, then try again.",
   NOT_PRIVACY_POOL: "Only the STRK20 pool can fill a slice. Check the anonymizer address.",
   SLICE_TOO_LARGE: "That slice is bigger than the plan's per-fill cap.",
   PLAN_EXHAUSTED: "This plan's total budget is already filled.",
@@ -54,8 +56,8 @@ export function friendlyError(err: unknown, fallback = "Something went wrong."):
   if (lower.includes("chain") && lower.includes("mismatch")) {
     return "Wrong network. Switch your wallet to Starknet Mainnet.";
   }
-  if (lower.includes("viewing key") || lower.includes("not registered")) {
-    return "Register your viewing key with the pool before moving value privately.";
+  if (lower.includes("viewing key") || lower.includes("not_registered") || lower.includes("not registered")) {
+    return CONTRACT_ERRORS.NOT_REGISTERED;
   }
   if (lower.includes("screening") || lower.includes("compliance")) {
     return "The deposit screening provider rejected this deposit.";

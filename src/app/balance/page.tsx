@@ -11,6 +11,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 import {
+  AlertTriangle,
   ArrowDown,
   ChevronDown,
   ExternalLink,
@@ -27,7 +28,7 @@ import ConnectButton from "@/components/wallet/ConnectButton";
 import { useWallet } from "@/context/WalletContext";
 import { useToast } from "@/context/ToastContext";
 import { explorerTxUrl, providerFor, TOKENS, tokenByAddress } from "@/lib/starknet/config";
-import { readErc20Balance } from "@/lib/starknet/erc20";
+import { isViewingKeyRegistered, readErc20Balance } from "@/lib/starknet/erc20";
 import { privateTransferActions, shieldActions, unshieldActions } from "@/lib/strk20/actions";
 import { useStrk20Submit } from "@/lib/strk20/useStrk20Submit";
 import { useShieldedBalances } from "@/lib/strk20/useShieldedBalances";
@@ -89,7 +90,7 @@ const MODE_ORDER: Mode[] = ["shield", "send", "withdraw"];
 const ONRAMP_URL = "https://app.avnu.fi/en/buy";
 
 export default function BalancePage() {
-  const { isConnected, address, network, isSupportedNetwork } = useWallet();
+  const { isConnected, address, network, isSupportedNetwork, wallet } = useWallet();
   const { showSuccess, showError, showInfo } = useToast();
   const { submit, isBusy, status, txHash } = useStrk20Submit();
   const { balances, balanceOf, loading, refresh } = useShieldedBalances();
@@ -102,6 +103,8 @@ export default function BalancePage() {
   const [error, setError] = useState<string | null>(null);
   /** What the connected address holds publicly — what Shield actually spends from. */
   const [publicRaw, setPublicRaw] = useState<bigint | null>(null);
+  /** null = unknown / unreachable pool, false = no viewing key yet. */
+  const [registered, setRegistered] = useState<boolean | null>(null);
 
   const token = useMemo(() => tokenByAddress(tokenAddress) ?? TOKENS[0], [tokenAddress]);
   const copy = MODES[mode];
@@ -124,6 +127,21 @@ export default function BalancePage() {
     }
     setPublicRaw(await readErc20Balance(providerFor(network), token.address, address));
   }, [address, network, token.address]);
+
+  // Every pool action reverts with NOT_REGISTERED until the wallet has set a viewing key, and a
+  // dapp can't do it (the wallet API has no such action). Detect it rather than let the user find
+  // out by spending a transaction.
+  const refreshRegistration = useCallback(async () => {
+    if (!address || !network.privacyPool) {
+      setRegistered(null);
+      return;
+    }
+    setRegistered(await isViewingKeyRegistered(providerFor(network), network.privacyPool, address));
+  }, [address, network]);
+
+  useEffect(() => {
+    void refreshRegistration();
+  }, [refreshRegistration]);
 
   useEffect(() => {
     void refreshPublic();
@@ -187,7 +205,7 @@ export default function BalancePage() {
             : `Withdrew ${formatToken(amountNumber)} ${token.symbol}.`,
       );
       setAmount("");
-      void Promise.all([refresh(), refreshPublic()]);
+      void Promise.all([refresh(), refreshPublic(), refreshRegistration()]);
     } else if (result.error) {
       const message = friendlyError(result.error);
       setError(message);
@@ -201,10 +219,12 @@ export default function BalancePage() {
       : "Proving…"
     : !hasAmount
       ? "Enter an amount"
-      : overspending
-        ? spending
-          ? "Not enough private balance"
-          : `Not enough ${token.symbol} in your wallet`
+      : registered === false
+        ? "Set up your private balance first"
+        : overspending
+          ? spending
+            ? "Not enough private balance"
+            : `Not enough ${token.symbol} in your wallet`
         : spending && !recipient.trim()
           ? `${copy.cta} to yourself`
           : copy.cta;
@@ -233,6 +253,27 @@ export default function BalancePage() {
         </div>
       }
     >
+      {registered === false ? (
+        <div className="mb-3 rounded-2xl bg-warning/10 border border-warning/25 p-4 flex gap-2.5">
+          <AlertTriangle className="w-4 h-4 text-warning shrink-0 mt-0.5" />
+          <div className="text-sm leading-relaxed">
+            <p className="text-foreground font-medium">Private balance not set up yet</p>
+            <p className="text-text-secondary mt-1">
+              The STRK20 pool has no viewing key for this address, so it will reject every action
+              with <code className="font-mono text-xs">NOT_REGISTERED</code>. Only your wallet can
+              register one — the wallet API gives apps no way to do it. Set up the private balance in{" "}
+              {wallet?.name ?? "your wallet"}, then reload.
+            </p>
+            <button
+              onClick={() => void refreshRegistration()}
+              className="mt-2.5 px-3 py-1.5 rounded-xl bg-surface-2 hover:bg-surface-hover text-xs font-medium transition-colors"
+            >
+              Check again
+            </button>
+          </div>
+        </div>
+      ) : null}
+
       {/* Mode switch */}
       <div className="flex gap-1.5 p-1 rounded-2xl bg-surface-2 mb-3">
         {MODE_ORDER.map((key) => (
@@ -366,7 +407,7 @@ export default function BalancePage() {
       ) : (
         <button
           onClick={() => void run()}
-          disabled={isBusy || !hasAmount || overspending}
+          disabled={isBusy || !hasAmount || overspending || registered === false}
           className="mt-3 w-full px-4 py-3.5 rounded-2xl bg-primary hover:bg-primary-hover text-white font-semibold flex items-center justify-center gap-2 disabled:opacity-60 transition-colors"
         >
           {isBusy ? <GhostLoader size="sm" className="scale-75" /> : <Lock className="w-4 h-4" />}
@@ -460,9 +501,10 @@ export default function BalancePage() {
               works if you&apos;re starting from nothing.
             </li>
             <li>
-              Shield it above. Your wallet registers a viewing key with the pool the first time, and
-              asks you to approve it.
+              Set up the private balance in your wallet. That registers a viewing key with the pool,
+              and it&apos;s the one step no app can do for you.
             </li>
+            <li>Shield a token above.</li>
             <li>
               <Link href="/orders" className="text-primary hover:underline">
                 Commit an order

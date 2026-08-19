@@ -28,3 +28,31 @@ export async function readErc20Balance(
     return null;
   }
 }
+
+/**
+ * Whether `owner` has a viewing key registered with the privacy pool.
+ *
+ * The pool keys every private balance to a viewing key set through `ClientAction::SetViewingKey`,
+ * and rejects any action from an address without one — the revert reads `NOT_REGISTERED`. The wallet
+ * API exposes only deposit / withdraw / transfer / invoke, so a dapp *cannot* register on the user's
+ * behalf: it has to happen inside the wallet. All we can do is detect it and say so before the user
+ * spends a transaction discovering it.
+ *
+ * Returns null when the pool can't be reached, so a dead RPC isn't reported as "not registered".
+ */
+export async function isViewingKeyRegistered(
+  provider: ProviderInterface,
+  pool: string,
+  owner: string,
+): Promise<boolean | null> {
+  try {
+    const result = await provider.callContract({
+      contractAddress: pool,
+      entrypoint: "get_public_key",
+      calldata: [owner],
+    });
+    return BigInt(result[0] ?? "0x0") !== 0n;
+  } catch {
+    return null;
+  }
+}
