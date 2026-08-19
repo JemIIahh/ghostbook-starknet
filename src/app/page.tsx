@@ -6,6 +6,7 @@ import Image from "next/image";
 import Link from "next/link";
 import GhostLogo from "@/components/GhostLogo";
 import { MAINNET, explorerContractUrl } from "@/lib/starknet/config";
+import { ghostHeight } from "@/components/ghostArt";
 
 const features = [
   {
@@ -85,7 +86,7 @@ export default function Home() {
               src="/ghost.png"
               alt=""
               width={f.size}
-              height={f.size}
+              height={ghostHeight(f.size)}
               className="select-none"
               aria-hidden
             />
@@ -160,7 +161,7 @@ export default function Home() {
                     src="/ghost.png"
                     alt=""
                     width={120}
-                    height={120}
+                    height={ghostHeight(120)}
                     className="pointer-events-none absolute -right-3 -bottom-4 opacity-[0.1] rotate-12 group-hover:opacity-[0.18] transition-opacity"
                     aria-hidden
                   />
@@ -321,7 +322,7 @@ export default function Home() {
             src="/ghost.png"
             alt=""
             width={280}
-            height={280}
+            height={ghostHeight(280)}
             className="pointer-events-none absolute -left-10 -bottom-12 opacity-[0.14] -rotate-12"
             aria-hidden
           />
@@ -329,7 +330,7 @@ export default function Home() {
             src="/ghost.png"
             alt=""
             width={220}
-            height={220}
+            height={ghostHeight(220)}
             className="pointer-events-none absolute -right-8 top-0 opacity-[0.12] rotate-12"
             aria-hidden
           />

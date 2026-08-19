@@ -1,6 +1,7 @@
 "use client";
 
 import Image from "next/image";
+import { logoHeight } from "@/components/ghostArt";
 
 type GhostLogoProps = {
   size?: number;
@@ -21,7 +22,7 @@ export default function GhostLogo({
       src="/logo.png"
       alt={alt}
       width={size}
-      height={size}
+      height={logoHeight(size)}
       priority={priority}
       className={`object-contain ${className}`}
     />

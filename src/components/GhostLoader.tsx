@@ -1,6 +1,7 @@
 "use client";
 
 import Image from "next/image";
+import { ghostHeight } from "@/components/ghostArt";
 
 type GhostLoaderProps = {
   /** Visual scale of the ghost */
@@ -63,7 +64,7 @@ export default function GhostLoader({
             src="/ghost.png"
             alt=""
             width={px}
-            height={px}
+            height={ghostHeight(px)}
             priority
             className="object-contain select-none pointer-events-none"
             aria-hidden
@@ -94,7 +95,7 @@ export default function GhostLoader({
         src="/ghost.png"
         alt=""
         width={280}
-        height={280}
+        height={ghostHeight(280)}
         className="pointer-events-none absolute -left-10 top-16 opacity-[0.06] -rotate-12 select-none"
         aria-hidden
       />
@@ -102,7 +103,7 @@ export default function GhostLoader({
         src="/ghost.png"
         alt=""
         width={220}
-        height={220}
+        height={ghostHeight(220)}
         className="pointer-events-none absolute -right-8 bottom-20 opacity-[0.05] rotate-12 select-none"
         aria-hidden
       />

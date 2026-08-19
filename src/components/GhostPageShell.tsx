@@ -4,6 +4,7 @@ import Image from "next/image";
 import { motion } from "framer-motion";
 import type { ReactNode } from "react";
 import GhostLogo from "@/components/GhostLogo";
+import { ghostHeight } from "@/components/ghostArt";
 
 const WIDTH = {
   xs: "max-w-[480px]",
@@ -39,7 +40,7 @@ export default function GhostPageShell({
         src="/ghost.png"
         alt=""
         width={340}
-        height={340}
+        height={ghostHeight(340)}
         className="pointer-events-none absolute -right-16 top-16 opacity-[0.08] rotate-12 hidden sm:block"
         aria-hidden
       />
@@ -47,7 +48,7 @@ export default function GhostPageShell({
         src="/ghost.png"
         alt=""
         width={240}
-        height={240}
+        height={ghostHeight(240)}
         className="pointer-events-none absolute -left-12 bottom-16 opacity-[0.07] -rotate-12 hidden sm:block"
         aria-hidden
       />
@@ -55,7 +56,7 @@ export default function GhostPageShell({
         src="/ghost.png"
         alt=""
         width={160}
-        height={160}
+        height={ghostHeight(160)}
         className="pointer-events-none absolute right-1/4 bottom-8 opacity-[0.04] rotate-6 hidden lg:block"
         aria-hidden
       />
