@@ -17,13 +17,24 @@ import { explorerContractUrl } from "@/lib/starknet/config";
 import GhostLogo from "@/components/GhostLogo";
 import GhostLoader from "@/components/GhostLoader";
 
-/** Deterministic gradient from an address for the avatar ring. */
+/**
+ * Deterministic gradient and initials from an address.
+ *
+ * Starknet addresses are zero-padded to 64 hex characters and a felt's top nibble is virtually
+ * always 0, so the *leading* characters carry almost no entropy — every avatar would read "00".
+ * The tail is used instead.
+ */
 function avatarStyle(address: string): CSSProperties {
-  const hue = parseInt(address.slice(2, 8), 16) % 360;
+  const tail = address.slice(-6);
+  const hue = parseInt(tail, 16) % 360;
   const hue2 = (hue + 48) % 360;
   return {
     background: `linear-gradient(135deg, hsl(${hue} 70% 48%), hsl(${hue2} 65% 38%))`,
   };
+}
+
+function initials(address: string): string {
+  return address.slice(-2).toUpperCase();
 }
 
 /** `full` renders the card-CTA shape used inside page panels. */
@@ -38,14 +49,17 @@ export default function ConnectButton({ variant = "pill" }: ConnectButtonProps) 
     shortAddress,
     network,
     isSupportedNetwork,
+    isDiscovering,
     error,
     connect,
+    switchToMainnet,
     disconnect,
   } = useWallet();
 
   const [dropdownOpen, setDropdownOpen] = useState(false);
   const [pickerOpen, setPickerOpen] = useState(false);
   const [copied, setCopied] = useState(false);
+  const [localError, setLocalError] = useState<string | null>(null);
   const dropdownRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -57,6 +71,24 @@ export default function ConnectButton({ variant = "pill" }: ConnectButtonProps) 
     document.addEventListener("mousedown", handleClickOutside);
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, []);
+
+  // Escape closes whichever surface is open — a modal with no keyboard exit is a trap.
+  useEffect(() => {
+    if (!dropdownOpen && !pickerOpen) return;
+    function onKeyDown(e: KeyboardEvent) {
+      if (e.key !== "Escape") return;
+      setDropdownOpen(false);
+      if (!isPending) setPickerOpen(false);
+    }
+    document.addEventListener("keydown", onKeyDown);
+    return () => document.removeEventListener("keydown", onKeyDown);
+  }, [dropdownOpen, pickerOpen, isPending]);
+
+  const openPicker = () => {
+    // A failure from a previous attempt must not greet the next one.
+    setLocalError(null);
+    setPickerOpen(true);
+  };
 
   const handleCopy = () => {
     if (address) {
@@ -72,11 +104,12 @@ export default function ConnectButton({ variant = "pill" }: ConnectButtonProps) 
   };
 
   const pick = async (wallet: WalletWithStarknetFeatures) => {
+    setLocalError(null);
     try {
       await connect(wallet);
       setPickerOpen(false);
-    } catch {
-      /* surfaced through context error */
+    } catch (err) {
+      setLocalError(err instanceof Error ? err.message : "Wallet connection failed.");
     }
   };
 
@@ -129,6 +162,11 @@ export default function ConnectButton({ variant = "pill" }: ConnectButtonProps) 
                   </button>
                 ))}
               </div>
+            ) : isDiscovering ? (
+              <div className="flex items-center gap-2.5 py-2 text-xs text-text-secondary">
+                <GhostLoader size="sm" className="scale-[0.55]" />
+                Looking for wallets…
+              </div>
             ) : (
               <p className="text-xs text-text-secondary leading-relaxed">
                 No Starknet wallet detected.{" "}
@@ -144,7 +182,9 @@ export default function ConnectButton({ variant = "pill" }: ConnectButtonProps) 
               </p>
             )}
 
-            {error ? <p className="mt-3 text-xs text-danger">{error}</p> : null}
+            {localError ?? error ? (
+              <p className="mt-3 text-xs text-danger">{localError ?? error}</p>
+            ) : null}
           </motion.div>
         </motion.div>
       )}
@@ -155,7 +195,7 @@ export default function ConnectButton({ variant = "pill" }: ConnectButtonProps) 
     return (
       <>
         <button
-          onClick={() => setPickerOpen(true)}
+          onClick={openPicker}
           disabled={isPending}
           className={
             variant === "full"
@@ -180,7 +220,7 @@ export default function ConnectButton({ variant = "pill" }: ConnectButtonProps) 
         style={avatarStyle(address)}
       >
         <span className="absolute inset-0 flex items-center justify-center text-[11px] font-bold text-white/95 tracking-wide select-none">
-          {address.replace("0x", "").slice(0, 2).toUpperCase()}
+          {initials(address)}
         </span>
         <span
           className={`absolute -bottom-0.5 -right-0.5 w-2.5 h-2.5 rounded-full ring-2 ring-background ${
@@ -209,8 +249,14 @@ export default function ConnectButton({ variant = "pill" }: ConnectButtonProps) 
           {!isSupportedNetwork ? (
             <div className="mx-2 mb-2 px-3 py-2.5 rounded-xl bg-surface-2">
               <p className="text-xs text-warning leading-relaxed">
-                Switch your wallet to Starknet Mainnet — the STRK20 pool lives there.
+                The STRK20 pool lives on Starknet Mainnet.
               </p>
+              <button
+                onClick={() => void switchToMainnet()}
+                className="mt-2 w-full py-1.5 rounded-lg text-xs font-semibold bg-primary hover:bg-primary-hover text-white transition-colors"
+              >
+                Switch to Mainnet
+              </button>
             </div>
           ) : null}
 
