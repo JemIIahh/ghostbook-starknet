@@ -181,8 +181,13 @@ the plan builder, live Ekubo quotes and per-slice fills with on-chain progress. 
 `planHash()` is pinned against the contract by `test_plan_hash_matches_frontend`, so the two can't
 silently diverge.
 
-Not done yet: mainnet declare/deploy of the anonymizer, the three mainnet transactions and demo
-video recorded in `strk20.json`, and a hosted demo.
+The anonymizer is live on Starknet mainnet at
+`0x0254fc4294398776cab056becb9630b996af2c10628e225ac7559e2d9069bacb`
+(class `0x2facd5d4f80f5343e3195e744f97b24b8ed4f37abb3ff85c5b69e9611e0327e`), bound to the STRK20
+privacy pool — `get_privacy_pool` echoes it, and `compute_plan_hash` on the deployed contract agrees
+with the frontend's `planHash()` for a real ETH/USDC plan.
+
+Not done yet: the three mainnet fills and demo video recorded in `strk20.json`, and a hosted demo.
 
 GhostBook began as a TEE-based confidential DEX on Flare Coston2 (Uniswap V3 fork + `PrivacyRouter`).
 That stack has been removed: on Starknet the privacy is protocol-level via STRK20 rather than
