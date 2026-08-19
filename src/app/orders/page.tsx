@@ -25,7 +25,7 @@ import {
   X,
 } from "lucide-react";
 import GhostPageShell from "@/components/GhostPageShell";
-import TokenIcon, { getTokenEmoji } from "@/components/TokenIcon";
+import TokenIcon from "@/components/TokenIcon";
 import ConnectButton from "@/components/wallet/ConnectButton";
 import { useWallet } from "@/context/WalletContext";
 import { useToast } from "@/context/ToastContext";
@@ -601,13 +601,17 @@ export default function OrdersPage() {
                         setQuote(q);
                         setPrice("");
                       }}
-                      className={`flex-1 py-2 rounded-xl text-xs font-semibold transition-colors ${
+                      className={`flex-1 py-2 rounded-xl text-xs font-semibold transition-colors flex items-center justify-center gap-1.5 ${
                         active
                           ? "bg-surface text-foreground border border-border"
                           : "text-text-secondary hover:text-foreground"
                       }`}
                     >
-                      {getTokenEmoji(b.symbol)} {b.symbol}/{getTokenEmoji(q.symbol)} {q.symbol}
+                      <span className="flex -space-x-1.5">
+                        <TokenIcon symbol={b.symbol} size="sm" className="scale-[0.8]" />
+                        <TokenIcon symbol={q.symbol} size="sm" className="scale-[0.8]" />
+                      </span>
+                      {b.symbol}/{q.symbol}
                     </button>
                   );
                 })}

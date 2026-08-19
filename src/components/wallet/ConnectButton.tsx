@@ -43,6 +43,7 @@ type ConnectButtonProps = { variant?: "pill" | "full" };
 export default function ConnectButton({ variant = "pill" }: ConnectButtonProps) {
   const {
     wallets,
+    wallet,
     isConnected,
     isPending,
     address,
@@ -237,9 +238,21 @@ export default function ConnectButton({ variant = "pill" }: ConnectButtonProps) 
       {dropdownOpen && (
         <div className="absolute right-0 top-full mt-2 w-64 rounded-2xl bg-surface border border-border shadow-xl p-2 z-50">
           <div className="flex items-center gap-3 px-3 py-3 mb-1">
-            <GhostLogo size={48} className="w-12 h-12 shrink-0" alt="" />
+            {wallet?.icon ? (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img
+                src={wallet.icon}
+                alt=""
+                className="w-10 h-10 rounded-xl shrink-0 ring-1 ring-border"
+              />
+            ) : (
+              <GhostLogo size={40} className="w-10 h-10 shrink-0" alt="" />
+            )}
             <div className="min-w-0">
-              <p className="text-sm font-semibold truncate">{shortAddress}</p>
+              <p className="text-sm font-semibold truncate">{wallet?.name ?? "Wallet"}</p>
+              <p className="text-xs text-text-secondary font-mono truncate mt-0.5">
+                {shortAddress}
+              </p>
               <p className="text-xs text-text-secondary flex items-center gap-1.5 mt-0.5">
                 <span
                   className={`w-1.5 h-1.5 rounded-full ${
