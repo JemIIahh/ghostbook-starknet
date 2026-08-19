@@ -110,7 +110,7 @@ export default async function OpenGraphImage() {
               gap: 12,
             }}
           >
-            {["Swap", "Orders", "Vault"].map((label) => (
+            {["Balance", "Orders"].map((label) => (
               <div
                 key={label}
                 style={{

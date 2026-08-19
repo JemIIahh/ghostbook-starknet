@@ -7,7 +7,7 @@ export default function sitemap(): MetadataRoute.Sitemap {
       ? `https://${process.env.VERCEL_PROJECT_PRODUCTION_URL}`
       : "https://ghostbook.xyz");
 
-  const paths = ["", "/orders", "/private"];
+  const paths = ["", "/orders", "/balance"];
 
   const now = new Date();
 

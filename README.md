@@ -165,7 +165,7 @@ ghostbook/
 ├── scripts/                     # find-pools.mjs, quote.mjs (Ekubo probes)
 ├── public/                      # Brand assets
 └── src/
-    ├── app/                     # Next.js routes: landing, /private, /orders
+    ├── app/                     # Next.js routes: landing, /balance, /orders
     ├── components/
     ├── context/
     └── lib/
@@ -176,7 +176,7 @@ ghostbook/
 ## Status
 
 The Cairo anonymizer (19 passing tests) and the Starknet client layer are complete, and the UI is
-ported: `/private` covers shield, private transfer, unshield and shielded balances; `/orders` covers
+ported: `/balance` covers shield, private send, withdraw and shielded balances; `/orders` covers
 the plan builder, live Ekubo quotes and per-slice fills with on-chain progress. The frontend's
 `planHash()` is pinned against the contract by `test_plan_hash_matches_frontend`, so the two can't
 silently diverge.

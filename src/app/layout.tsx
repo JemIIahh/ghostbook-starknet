@@ -1,29 +1,17 @@
 import type { Metadata, Viewport } from "next";
-import { Geist, IBM_Plex_Mono, Space_Grotesk } from "next/font/google";
+import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
 import Navbar from "@/components/Navbar";
 import { Providers } from "@/app/Providers";
 
-/** Body face. */
 const geistSans = Geist({
   variable: "--font-geist-sans",
   subsets: ["latin"],
 });
 
-/**
- * Display and mono stand-ins for the STRK20 brand faces (Unison Pro / GT America Mono are
- * commercial): the brand guide names Space Grotesk and IBM Plex Mono as the free substitutes.
- */
-const spaceGrotesk = Space_Grotesk({
-  variable: "--font-space-grotesk",
+const geistMono = Geist_Mono({
+  variable: "--font-geist-mono",
   subsets: ["latin"],
-  weight: ["500", "700"],
-});
-
-const plexMono = IBM_Plex_Mono({
-  variable: "--font-plex-mono",
-  subsets: ["latin"],
-  weight: ["400", "500"],
 });
 
 const siteUrl =
@@ -38,8 +26,8 @@ const description =
 
 export const viewport: Viewport = {
   themeColor: [
-    { media: "(prefers-color-scheme: dark)", color: "#0d0d0d" },
-    { media: "(prefers-color-scheme: light)", color: "#0d0d0d" },
+    { media: "(prefers-color-scheme: dark)", color: "#000000" },
+    { media: "(prefers-color-scheme: light)", color: "#000000" },
   ],
   colorScheme: "dark",
   width: "device-width",
@@ -116,7 +104,7 @@ export const metadata: Metadata = {
     title,
   },
   other: {
-    "msapplication-TileColor": "#0d0d0d",
+    "msapplication-TileColor": "#000000",
   },
 };
 
@@ -128,15 +116,11 @@ export default function RootLayout({
   return (
     <html lang="en" className="dark">
       <body
-        className={`${geistSans.variable} ${spaceGrotesk.variable} ${plexMono.variable} antialiased bg-background text-foreground`}
+        className={`${geistSans.variable} ${geistMono.variable} antialiased bg-background text-foreground`}
       >
-        {/* One soft ambient bloom and a barely-there grain. Nothing that competes with content. */}
-        <div className="bloom" aria-hidden />
-        <div className="grain" aria-hidden />
-
         <Providers>
           <Navbar />
-          <main className="relative z-[2] pt-14 min-h-screen">{children}</main>
+          <main className="pt-14 min-h-screen">{children}</main>
         </Providers>
       </body>
     </html>

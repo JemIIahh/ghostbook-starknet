@@ -1,62 +1,86 @@
 "use client";
 
+import Image from "next/image";
+import { motion } from "framer-motion";
 import type { ReactNode } from "react";
+import GhostLogo from "@/components/GhostLogo";
 
 const WIDTH = {
-  sm: "max-w-[560px]",
-  md: "max-w-[760px]",
-  lg: "max-w-[1100px]",
+  xs: "max-w-[480px]",
+  sm: "max-w-[480px]",
+  md: "max-w-[720px]",
+  lg: "max-w-[800px]",
 } as const;
 
 type GhostPageShellProps = {
-  /** Mono kicker above the title, e.g. "PRIVATE BALANCE". */
-  eyebrow?: string;
   title: string;
   subtitle?: string;
+  /** xs=400 (swap), sm=440, md=640 (vault/admin), lg=800 (pools/orders) */
   maxWidth?: keyof typeof WIDTH;
   headerRight?: ReactNode;
   children: ReactNode;
   className?: string;
 };
 
-/**
- * Page frame: mono eyebrow, uppercase display title, hairline rule, then content.
- * Follows the STRK20 section rhythm — fluid gutter, capped width, generous top padding.
- */
+/** Shared Swap-style layout: ghost watermarks + logo header. */
 export default function GhostPageShell({
-  eyebrow,
   title,
   subtitle,
-  maxWidth = "md",
+  maxWidth = "sm",
   headerRight,
   children,
   className = "",
 }: GhostPageShellProps) {
   return (
-    <div className={`px-[clamp(20px,5vw,72px)] pt-14 sm:pt-20 pb-24 ${className}`}>
-      <div className={`mx-auto ${WIDTH[maxWidth]}`}>
-        <header className="reveal">
-          <div className="flex items-end justify-between gap-4 flex-wrap">
-            <div>
-              {eyebrow ? (
-                <p className="eyebrow mb-3.5">
-                  <b>◢</b> {eyebrow}
+    <div
+      className={`relative min-h-[calc(100vh-72px)] flex flex-col items-center px-4 pt-8 sm:pt-16 pb-12 overflow-hidden ${className}`}
+    >
+      <Image
+        src="/ghost.png"
+        alt=""
+        width={340}
+        height={340}
+        className="pointer-events-none absolute -right-16 top-16 opacity-[0.08] rotate-12 hidden sm:block"
+        aria-hidden
+      />
+      <Image
+        src="/ghost.png"
+        alt=""
+        width={240}
+        height={240}
+        className="pointer-events-none absolute -left-12 bottom-16 opacity-[0.07] -rotate-12 hidden sm:block"
+        aria-hidden
+      />
+      <Image
+        src="/ghost.png"
+        alt=""
+        width={160}
+        height={160}
+        className="pointer-events-none absolute right-1/4 bottom-8 opacity-[0.04] rotate-6 hidden lg:block"
+        aria-hidden
+      />
+
+      <motion.div
+        initial={{ opacity: 0, y: 12 }}
+        animate={{ opacity: 1, y: 0 }}
+        className={`w-full ${WIDTH[maxWidth]}`}
+      >
+        <div className="flex items-center justify-between gap-3 mb-3 px-1">
+          <div className="flex items-center gap-2.5 min-w-0">
+            <GhostLogo size={36} className="w-9 h-9 shrink-0" alt="" />
+            <div className="min-w-0">
+              <h1 className="text-lg font-semibold leading-tight">{title}</h1>
+              {subtitle ? (
+                <p className="text-xs sm:text-sm text-text-secondary mt-0.5 truncate">
+                  {subtitle}
                 </p>
               ) : null}
-              <h1 className="display text-[clamp(30px,4.4vw,50px)]">{title}</h1>
             </div>
-            {headerRight ? <div className="shrink-0 pb-1">{headerRight}</div> : null}
           </div>
-          {subtitle ? (
-            <p className="mt-4 max-w-[62ch] text-[14px] leading-relaxed text-text-secondary">
-              {subtitle}
-            </p>
-          ) : null}
-          <div className="mt-7 border-t border-border" />
-        </header>
-
-        <div className="mt-8">{children}</div>
-      </div>
+          {headerRight ? <div className="shrink-0">{headerRight}</div> : null}
+        </div>
+        {children}
+      </motion.div>
     </div>
   );
 }

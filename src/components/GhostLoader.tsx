@@ -89,7 +89,7 @@ export default function GhostLoader({
   return (
     <div className="fixed inset-0 z-[100] flex items-center justify-center overflow-hidden bg-background">
       {/* Atmosphere */}
-      <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(ellipse_at_center,rgba(197,52,0,0.14)_0%,transparent_55%)]" />
+      <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(ellipse_at_center,rgba(139,92,246,0.12)_0%,transparent_55%)]" />
       <Image
         src="/ghost.png"
         alt=""
