@@ -62,15 +62,17 @@ export default function ConnectButton({ variant = "pill" }: ConnectButtonProps) 
   const [localError, setLocalError] = useState<string | null>(null);
   const dropdownRef = useRef<HTMLDivElement>(null);
 
+  // Both panels are anchored inside the same container, so one outside-click handler covers them.
+  // The picker stays open while a connection is in flight — closing it would hide the spinner.
   useEffect(() => {
     function handleClickOutside(e: MouseEvent) {
-      if (dropdownRef.current && !dropdownRef.current.contains(e.target as Node)) {
-        setDropdownOpen(false);
-      }
+      if (dropdownRef.current?.contains(e.target as Node)) return;
+      setDropdownOpen(false);
+      setPickerOpen((open) => (isPending ? open : false));
     }
     document.addEventListener("mousedown", handleClickOutside);
     return () => document.removeEventListener("mousedown", handleClickOutside);
-  }, []);
+  }, [isPending]);
 
   // Escape closes whichever surface is open — a modal with no keyboard exit is a trap.
   useEffect(() => {
@@ -113,79 +115,82 @@ export default function ConnectButton({ variant = "pill" }: ConnectButtonProps) 
     }
   };
 
+  /**
+   * Anchored to the button, not a full-screen modal.
+   *
+   * A `position: fixed` overlay cannot be used here: the navbar carries `backdrop-blur`, and
+   * `backdrop-filter` makes an element a containing block for fixed descendants — so `inset-0`
+   * resolved to the 56px-tall navbar and the panel rendered clipped at the top of the page. An
+   * anchored panel is immune to that, matches the account dropdown, and puts the choice where the
+   * user clicked.
+   */
   const picker = (
     <AnimatePresence>
       {pickerOpen && (
         <motion.div
-          initial={{ opacity: 0 }}
-          animate={{ opacity: 1 }}
-          exit={{ opacity: 0 }}
-          className="fixed inset-0 bg-black/60 backdrop-blur-sm z-[60] flex items-center justify-center p-4"
-          onClick={() => !isPending && setPickerOpen(false)}
+          initial={{ opacity: 0, y: -4, scale: 0.98 }}
+          animate={{ opacity: 1, y: 0, scale: 1 }}
+          exit={{ opacity: 0, y: -4, scale: 0.98 }}
+          transition={{ duration: 0.14 }}
+          className={`absolute top-full mt-2 z-50 rounded-2xl bg-surface border border-border shadow-xl p-3 ${
+            variant === "full" ? "left-0 right-0" : "right-0 w-[300px]"
+          }`}
         >
-          <motion.div
-            initial={{ scale: 0.98, opacity: 0 }}
-            animate={{ scale: 1, opacity: 1 }}
-            exit={{ scale: 0.98, opacity: 0 }}
-            onClick={(e) => e.stopPropagation()}
-            className="w-full max-w-[360px] rounded-2xl bg-surface border border-border p-4"
-          >
-            <div className="flex items-center justify-between mb-3">
-              <h3 className="text-sm font-semibold">Connect a Starknet wallet</h3>
-              <button
-                onClick={() => setPickerOpen(false)}
-                className="p-1 rounded-lg hover:bg-surface-hover"
-                aria-label="Close"
-              >
-                <X className="w-4 h-4" />
-              </button>
-            </div>
+          <div className="flex items-center justify-between mb-2">
+            <h3 className="text-sm font-semibold">Connect a wallet</h3>
+            <button
+              onClick={() => setPickerOpen(false)}
+              className="p-1 rounded-lg text-text-tertiary hover:text-foreground hover:bg-surface-2 transition-colors"
+              aria-label="Close"
+            >
+              <X className="w-3.5 h-3.5" />
+            </button>
+          </div>
 
-            <p className="text-xs text-text-secondary leading-relaxed mb-4">
-              GhostBook needs a wallet that implements the STRK20 wallet API — the wallet performs
-              every private action, so this app never touches your viewing key.
-            </p>
+          <p className="text-xs text-text-tertiary leading-relaxed mb-3">
+            Needs the STRK20 wallet API — the wallet performs every private action, so GhostBook
+            never touches your viewing key.
+          </p>
 
-            {wallets.length ? (
-              <div className="space-y-2">
-                {wallets.map((wallet) => (
-                  <button
-                    key={wallet.name}
-                    onClick={() => pick(wallet)}
-                    disabled={isPending}
-                    className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl bg-surface-2 hover:bg-surface-hover transition-colors disabled:opacity-50"
-                  >
-                    {/* eslint-disable-next-line @next/next/no-img-element */}
-                    <img src={wallet.icon} alt="" className="w-7 h-7 rounded-lg" />
-                    <span className="text-sm font-medium flex-1 text-left">{wallet.name}</span>
-                    {isPending ? <GhostLoader size="sm" className="scale-[0.55]" /> : null}
-                  </button>
-                ))}
-              </div>
-            ) : isDiscovering ? (
-              <div className="flex items-center gap-2.5 py-2 text-xs text-text-secondary">
-                <GhostLoader size="sm" className="scale-[0.55]" />
-                Looking for wallets…
-              </div>
-            ) : (
-              <p className="text-xs text-text-secondary leading-relaxed">
-                No Starknet wallet detected.{" "}
-                <a
-                  href="https://www.ready.co/"
-                  target="_blank"
-                  rel="noreferrer"
-                  className="text-primary hover:underline"
+          {wallets.length ? (
+            <div className="space-y-1.5">
+              {wallets.map((wallet) => (
+                <button
+                  key={wallet.name}
+                  onClick={() => pick(wallet)}
+                  disabled={isPending}
+                  className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl bg-surface-2 hover:bg-surface-hover transition-colors disabled:opacity-50"
                 >
-                  Ready
-                </a>{" "}
-                supports STRK20 today.
-              </p>
-            )}
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img src={wallet.icon} alt="" className="w-6 h-6 rounded-md shrink-0" />
+                  <span className="text-sm font-medium flex-1 text-left truncate">{wallet.name}</span>
+                  {isPending ? <GhostLoader size="sm" className="scale-[0.5]" /> : null}
+                </button>
+              ))}
+            </div>
+          ) : isDiscovering ? (
+            <div className="flex items-center gap-2.5 py-2 text-xs text-text-secondary">
+              <GhostLoader size="sm" className="scale-[0.55]" />
+              Looking for wallets…
+            </div>
+          ) : (
+            <p className="text-xs text-text-secondary leading-relaxed">
+              No Starknet wallet detected.{" "}
+              <a
+                href="https://www.ready.co/"
+                target="_blank"
+                rel="noreferrer"
+                className="text-primary hover:underline"
+              >
+                Ready
+              </a>{" "}
+              supports STRK20 today.
+            </p>
+          )}
 
-            {localError ?? error ? (
-              <p className="mt-3 text-xs text-danger">{localError ?? error}</p>
-            ) : null}
-          </motion.div>
+          {localError ?? error ? (
+            <p className="mt-2.5 text-xs text-danger leading-relaxed">{localError ?? error}</p>
+          ) : null}
         </motion.div>
       )}
     </AnimatePresence>
@@ -193,7 +198,7 @@ export default function ConnectButton({ variant = "pill" }: ConnectButtonProps) 
 
   if (!isConnected || !address) {
     return (
-      <>
+      <div ref={dropdownRef} className={`relative ${variant === "full" ? "w-full" : ""}`}>
         <button
           onClick={openPicker}
           disabled={isPending}
@@ -206,7 +211,7 @@ export default function ConnectButton({ variant = "pill" }: ConnectButtonProps) 
           {isPending ? "Connecting…" : variant === "full" ? "Connect Wallet" : "Connect"}
         </button>
         {picker}
-      </>
+      </div>
     );
   }
 

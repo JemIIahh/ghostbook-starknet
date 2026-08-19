@@ -162,30 +162,49 @@ export function WalletProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   /**
-   * Builds an account bound to the provider for whichever chain the wallet is actually on.
+   * Authorizes the wallet, then binds the account to the provider for whichever chain it reports.
    *
-   * The chain is read first, because the account's provider can't be corrected afterwards — only
-   * replaced. `requestChainId` needs no authorization, so this costs nothing and prompts nothing.
+   * Order matters and is not the obvious one. Reading the chain first would let us build the account
+   * against the right provider in one step, but wallets are entitled to reject *every* request until
+   * the dapp is authorized — Ready answers `wallet_requestChainId` with "Not preauthorized" — so the
+   * chain is unreadable before connecting. We therefore connect against the default network's
+   * provider, read the chain, and rebind if it turned out to be something else. The rebind is
+   * silent, because authorization already happened.
    */
   const openSession = useCallback(
     async (selected: WalletWithStarknetFeatures, silent: boolean) => {
-      const chain = (await walletV6.requestChainId(selected)) as string;
-      const target = networkForChainId(chain) ?? NETWORKS[DEFAULT_NETWORK];
-      const provider = providerFor(target);
-
-      const account = silent
-        ? await WalletAccountV6.connectSilent(provider, selected)
-        : await WalletAccountV6.connect(provider, selected);
+      const fallback = NETWORKS[DEFAULT_NETWORK];
+      const initial = silent
+        ? await WalletAccountV6.connectSilent(providerFor(fallback), selected)
+        : await WalletAccountV6.connect(providerFor(fallback), selected);
 
       // `standard:connect` already authorized the accounts; an address is the proof it worked, so
       // there is no need for a second `requestAccounts` round trip.
-      const parsed = parseAddress(account?.address);
+      const parsed = parseAddress(initial?.address);
       if (!parsed) throw new Error("This wallet did not return an account.");
+
+      let chain: string | null = null;
+      try {
+        chain = (await walletV6.requestChainId(selected)) as string;
+      } catch {
+        // Readable on the next focus or change event; assume the chain we connected against.
+        chain = null;
+      }
+
+      let account = initial;
+      const target = chain ? networkForChainId(chain) : null;
+      if (target && target.key !== fallback.key) {
+        try {
+          account = await WalletAccountV6.connectSilent(providerFor(target), selected);
+        } catch {
+          /* keep the working account rather than dropping the session over a rebind */
+        }
+      }
 
       setWallet(selected);
       setWalletAccount(account);
-      setAddress(parsed);
-      setChainId(chain);
+      setAddress(parseAddress(account?.address) ?? parsed);
+      setChainId(chain ?? fallback.chainId);
       setStatus("connected");
       if (typeof window !== "undefined") {
         window.localStorage.setItem(LAST_WALLET_KEY, selected.name);
@@ -202,7 +221,12 @@ export function WalletProvider({ children }: { children: React.ReactNode }) {
         await openSession(selected, false);
       } catch (err) {
         clearSession();
-        setError(err instanceof Error ? err.message : "Wallet connection failed.");
+        const raw = err instanceof Error ? err.message : "";
+        setError(
+          /preauthoriz/i.test(raw)
+            ? "The wallet declined the connection. Approve GhostBook in the wallet and try again."
+            : raw || "Wallet connection failed.",
+        );
         throw err;
       }
     },
