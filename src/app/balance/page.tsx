@@ -8,7 +8,7 @@
  * are executed by the wallet through the STRK20 wallet API; this app never touches a viewing key.
  */
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 import {
   ArrowDown,
@@ -26,7 +26,8 @@ import TokenIcon from "@/components/TokenIcon";
 import ConnectButton from "@/components/wallet/ConnectButton";
 import { useWallet } from "@/context/WalletContext";
 import { useToast } from "@/context/ToastContext";
-import { explorerTxUrl, TOKENS, tokenByAddress } from "@/lib/starknet/config";
+import { explorerTxUrl, providerFor, TOKENS, tokenByAddress } from "@/lib/starknet/config";
+import { readErc20Balance } from "@/lib/starknet/erc20";
 import { privateTransferActions, shieldActions, unshieldActions } from "@/lib/strk20/actions";
 import { useStrk20Submit } from "@/lib/strk20/useStrk20Submit";
 import { useShieldedBalances } from "@/lib/strk20/useShieldedBalances";
@@ -99,15 +100,34 @@ export default function BalancePage() {
   const [recipient, setRecipient] = useState("");
   const [selectingToken, setSelectingToken] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  /** What the connected address holds publicly — what Shield actually spends from. */
+  const [publicRaw, setPublicRaw] = useState<bigint | null>(null);
 
   const token = useMemo(() => tokenByAddress(tokenAddress) ?? TOKENS[0], [tokenAddress]);
   const copy = MODES[mode];
   const available = fromSmallestUnit(balanceOf(token.address), token.decimals);
   /** Shield tops the pool up; the other two spend from it. */
   const spending = mode !== "shield";
+  const publicBalance =
+    publicRaw === null ? null : fromSmallestUnit(publicRaw, token.decimals);
+  /** The balance the current mode draws on: wallet for Shield, pool for Send/Withdraw. */
+  const sourceBalance = spending ? available : (publicBalance ?? 0);
   const amountNumber = Number(amount);
   const hasAmount = Number.isFinite(amountNumber) && amountNumber > 0;
-  const overspending = spending && hasAmount && amountNumber > available;
+  const overspending =
+    hasAmount && (spending ? amountNumber > available : publicBalance !== null && amountNumber > publicBalance);
+
+  const refreshPublic = useCallback(async () => {
+    if (!address) {
+      setPublicRaw(null);
+      return;
+    }
+    setPublicRaw(await readErc20Balance(providerFor(network), token.address, address));
+  }, [address, network, token.address]);
+
+  useEffect(() => {
+    void refreshPublic();
+  }, [refreshPublic]);
 
   // Clear the form when switching mode, so an amount typed for one doesn't carry into another.
   useEffect(() => {
@@ -131,7 +151,11 @@ export default function BalancePage() {
       return;
     }
     if (overspending) {
-      setError(`You only have ${formatToken(available)} ${token.symbol} in your private balance.`);
+      setError(
+        spending
+          ? `You only have ${formatToken(available)} ${token.symbol} in your private balance.`
+          : `You only have ${formatToken(publicBalance ?? 0)} ${token.symbol} in your wallet.`,
+      );
       return;
     }
 
@@ -163,7 +187,7 @@ export default function BalancePage() {
             : `Withdrew ${formatToken(amountNumber)} ${token.symbol}.`,
       );
       setAmount("");
-      void refresh();
+      void Promise.all([refresh(), refreshPublic()]);
     } else if (result.error) {
       const message = friendlyError(result.error);
       setError(message);
@@ -178,7 +202,9 @@ export default function BalancePage() {
     : !hasAmount
       ? "Enter an amount"
       : overspending
-        ? "Not enough private balance"
+        ? spending
+          ? "Not enough private balance"
+          : `Not enough ${token.symbol} in your wallet`
         : spending && !recipient.trim()
           ? `${copy.cta} to yourself`
           : copy.cta;
@@ -239,12 +265,19 @@ export default function BalancePage() {
             <span>{copy.payLabel}</span>
             <button
               type="button"
-              onClick={() => setAmount(String(available))}
-              disabled={!isConnected || available <= 0}
+              onClick={() => setAmount(String(sourceBalance))}
+              disabled={!isConnected || sourceBalance <= 0}
               className="text-xs hover:text-foreground transition-colors disabled:hover:text-text-tertiary"
-              title="Use your full private balance"
+              title={spending ? "Use your full private balance" : "Use your full wallet balance"}
             >
-              Bal: {isConnected ? formatToken(available) : "0.00"}
+              {spending ? "Private" : "Wallet"}:{" "}
+              {!isConnected
+                ? "0.00"
+                : spending
+                  ? formatToken(available)
+                  : publicRaw === null
+                    ? "…"
+                    : formatToken(publicBalance)}
             </button>
           </div>
           <div className="flex items-center gap-3">
@@ -269,7 +302,8 @@ export default function BalancePage() {
           </div>
           {overspending ? (
             <p className="mt-2 text-xs text-warning">
-              More than your private balance of {formatToken(available)} {token.symbol}.
+              More than your {spending ? "private balance" : "wallet balance"} of{" "}
+              {formatToken(spending ? available : (publicBalance ?? 0))} {token.symbol}.
             </p>
           ) : null}
         </div>
@@ -289,7 +323,9 @@ export default function BalancePage() {
             {spending ? (
               <span className="text-xs">Optional — defaults to you</span>
             ) : (
-              <span className="text-xs">Bal: {isConnected ? formatToken(available) : "0.00"}</span>
+              <span className="text-xs">
+                Private now: {isConnected ? formatToken(available) : "0.00"}
+              </span>
             )}
           </div>
 
@@ -356,7 +392,18 @@ export default function BalancePage() {
         ) : balances.length === 0 ? (
           <>
             <p className="text-text-secondary leading-relaxed">
-              Empty. Shield a token above, then you can trade it privately.
+              Empty — nothing is in the pool yet.{" "}
+              {publicBalance && publicBalance > 0 ? (
+                <>
+                  Your wallet holds{" "}
+                  <span className="text-foreground font-medium">
+                    {formatToken(publicBalance)} {token.symbol}
+                  </span>
+                  ; shield some above to trade it privately.
+                </>
+              ) : (
+                <>Shield a token above, then you can trade it privately.</>
+              )}
             </p>
             <a
               href={ONRAMP_URL}
