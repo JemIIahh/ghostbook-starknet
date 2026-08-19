@@ -12,6 +12,7 @@
  */
 
 import { useCallback, useEffect, useMemo, useState } from "react";
+import Link from "next/link";
 import { AnimatePresence, motion } from "framer-motion";
 import {
   AlertTriangle,
@@ -706,7 +707,10 @@ export default function OrdersPage() {
               {underfunded ? (
                 <p className="mt-1.5 text-xs text-warning">
                   Needs {formatToken(totalIn)} {tokenIn.symbol}; you have{" "}
-                  {formatToken(shielded)}.
+                  {formatToken(shielded)}.{" "}
+                  <Link href="/balance" className="text-primary hover:underline">
+                    Shield more →
+                  </Link>
                 </p>
               ) : null}
             </div>

@@ -79,6 +79,14 @@ const MODES: Record<
 
 const MODE_ORDER: Mode[] = ["shield", "send", "withdraw"];
 
+/**
+ * Step zero, which GhostBook can't do for you: getting tokens into a Starknet wallet at all.
+ *
+ * A link, nothing more — execution stays on Ekubo. It costs no privacy either: shielding is already
+ * a public deposit, so an on-ramp reveals nothing the deposit wasn't going to reveal anyway.
+ */
+const ONRAMP_URL = "https://app.avnu.fi/en/buy";
+
 export default function BalancePage() {
   const { isConnected, address, network, isSupportedNetwork } = useWallet();
   const { showSuccess, showError, showInfo } = useToast();
@@ -346,9 +354,20 @@ export default function BalancePage() {
         ) : balances === null ? (
           <p className="text-text-secondary">Reading…</p>
         ) : balances.length === 0 ? (
-          <p className="text-text-secondary leading-relaxed">
-            Empty. Shield a token above, then you can trade it privately.
-          </p>
+          <>
+            <p className="text-text-secondary leading-relaxed">
+              Empty. Shield a token above, then you can trade it privately.
+            </p>
+            <a
+              href={ONRAMP_URL}
+              target="_blank"
+              rel="noreferrer"
+              className="mt-3 flex items-center justify-center gap-1.5 w-full py-2.5 rounded-xl bg-surface-2 hover:bg-surface-hover text-sm font-medium transition-colors"
+            >
+              No {token.symbol} yet? Buy on Starknet
+              <ExternalLink className="w-3.5 h-3.5 text-text-tertiary" />
+            </a>
+          </>
         ) : (
           <>
             <ul className="divide-y divide-border">
@@ -378,10 +397,33 @@ export default function BalancePage() {
             </Link>
           </>
         )}
-        <p className="mt-3 pt-3 border-t border-border text-xs text-text-tertiary leading-relaxed">
-          Your wallet registers a viewing key with the pool the first time you shield. That happens
-          once, and the wallet asks you to approve it.
-        </p>
+        <div className="mt-3 pt-3 border-t border-border text-xs text-text-tertiary leading-relaxed">
+          <p className="text-text-secondary mb-1.5">First time here?</p>
+          <ol className="list-decimal list-inside space-y-1">
+            <li>
+              Get STRK, ETH or USDC into your Starknet wallet — an{" "}
+              <a
+                href={ONRAMP_URL}
+                target="_blank"
+                rel="noreferrer"
+                className="text-primary hover:underline"
+              >
+                on-ramp
+              </a>{" "}
+              works if you&apos;re starting from nothing.
+            </li>
+            <li>
+              Shield it above. Your wallet registers a viewing key with the pool the first time, and
+              asks you to approve it.
+            </li>
+            <li>
+              <Link href="/orders" className="text-primary hover:underline">
+                Commit an order
+              </Link>{" "}
+              and fill it slice by slice.
+            </li>
+          </ol>
+        </div>
       </div>
 
       {txHash ? (
