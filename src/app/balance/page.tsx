@@ -9,6 +9,7 @@
  */
 
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { walletV6 } from "starknet";
 import { AnimatePresence, motion } from "framer-motion";
 import {
   AlertTriangle,
@@ -105,6 +106,15 @@ export default function BalancePage() {
   const [publicRaw, setPublicRaw] = useState<bigint | null>(null);
   /** null = unknown / unreachable pool, false = no viewing key yet. */
   const [registered, setRegistered] = useState<boolean | null>(null);
+  /**
+   * What the connected wallet actually advertises.
+   *
+   * Registration is wallet-side and no dapp can trigger it, so when it's missing the only useful
+   * thing an app can do is report precisely what the wallet does and doesn't support — otherwise
+   * "set it up in your wallet" is untestable advice.
+   */
+  const [probe, setProbe] = useState<string | null>(null);
+  const [probing, setProbing] = useState(false);
 
   const token = useMemo(() => tokenByAddress(tokenAddress) ?? TOKENS[0], [tokenAddress]);
   const copy = MODES[mode];
@@ -131,6 +141,26 @@ export default function BalancePage() {
   // Every pool action reverts with NOT_REGISTERED until the wallet has set a viewing key, and a
   // dapp can't do it (the wallet API has no such action). Detect it rather than let the user find
   // out by spending a transaction.
+  const probeWallet = useCallback(async () => {
+    if (!wallet) return;
+    setProbing(true);
+    const lines: string[] = [];
+    const attempt = async (label: string, run: () => Promise<unknown>) => {
+      try {
+        lines.push(`${label}: ${JSON.stringify(await run())}`);
+      } catch (err) {
+        lines.push(`${label}: ERROR ${err instanceof Error ? err.message : String(err)}`);
+      }
+    };
+    await attempt("wallet", async () => wallet.name);
+    await attempt("supportedWalletApi", () => walletV6.supportedWalletApi(wallet));
+    await attempt("supportedSpecs", () => walletV6.supportedSpecs(wallet));
+    // If this resolves, the wallet implements the STRK20 read path.
+    await attempt("strk20Balances", () => walletV6.strk20Balances(wallet, []));
+    setProbe(lines.join("\n"));
+    setProbing(false);
+  }, [wallet]);
+
   const refreshRegistration = useCallback(async () => {
     if (!address || !network.privacyPool) {
       setRegistered(null);
@@ -264,12 +294,26 @@ export default function BalancePage() {
               register one — the wallet API gives apps no way to do it. Set up the private balance in{" "}
               {wallet?.name ?? "your wallet"}, then reload.
             </p>
-            <button
-              onClick={() => void refreshRegistration()}
-              className="mt-2.5 px-3 py-1.5 rounded-xl bg-surface-2 hover:bg-surface-hover text-xs font-medium transition-colors"
-            >
-              Check again
-            </button>
+            <div className="mt-2.5 flex flex-wrap gap-2">
+              <button
+                onClick={() => void refreshRegistration()}
+                className="px-3 py-1.5 rounded-xl bg-surface-2 hover:bg-surface-hover text-xs font-medium transition-colors"
+              >
+                Check again
+              </button>
+              <button
+                onClick={() => void probeWallet()}
+                disabled={probing}
+                className="px-3 py-1.5 rounded-xl bg-surface-2 hover:bg-surface-hover text-xs font-medium transition-colors disabled:opacity-50"
+              >
+                {probing ? "Checking…" : "What does my wallet support?"}
+              </button>
+            </div>
+            {probe ? (
+              <pre className="mt-2.5 p-2.5 rounded-xl bg-background border border-border text-[10px] leading-relaxed font-mono text-text-secondary overflow-x-auto whitespace-pre-wrap">
+                {probe}
+              </pre>
+            ) : null}
           </div>
         </div>
       ) : null}
