@@ -62,7 +62,12 @@ import { useShieldedBalances } from "@/lib/strk20/useShieldedBalances";
 import { friendlyError } from "@/lib/errors";
 import { formatDuration, formatPercentDelta, formatPrice, formatToken, shortHex } from "@/lib/format";
 
-type OrderType = "limit" | "market";
+/**
+ * `twap` is the same committed plan as `limit` — many slices, paced by `min_interval` — with the
+ * split surfaced instead of hidden, and the limit price acting as a floor rather than a target. The
+ * contract makes no distinction; only the framing differs.
+ */
+type OrderType = "limit" | "market" | "twap";
 type Side = "BUY" | "SELL";
 type Filter = "all" | "active" | "matched";
 
@@ -258,7 +263,12 @@ export default function OrdersPage() {
           return {
             hash: stored.hash,
             createdAt: stored.createdAt,
-            type: stored.label === "market" ? "market" : "limit",
+            type:
+              stored.label === "market"
+                ? "market"
+                : stored.label === "twap"
+                  ? "twap"
+                  : "limit",
             side: pairing.side,
             plan,
             tokenIn: rowIn,
@@ -345,7 +355,7 @@ export default function OrdersPage() {
       setError("No Ekubo pool can price this pair right now.");
       return;
     }
-    if (orderType === "limit" && !hasPrice) {
+    if (orderType !== "market" && !hasPrice) {
       setError("Set a limit price.");
       return;
     }
@@ -393,7 +403,7 @@ export default function OrdersPage() {
         showSuccess("Order committed. Fill a slice when the price is right.");
       }
       setAmount("");
-      if (orderType === "limit") setPrice("");
+      if (orderType !== "market") setPrice("");
       await loadRows();
     } finally {
       setIsPlacing(false);
@@ -478,13 +488,15 @@ export default function OrdersPage() {
       : "Committing…"
     : !hasAmount
       ? "Enter an amount"
-      : orderType === "limit" && !hasPrice
+      : orderType !== "market" && !hasPrice
         ? "Enter price & amount"
         : underfunded
           ? `Not enough private ${tokenIn.symbol}`
           : orderType === "market"
             ? `Market ${side.toLowerCase()}`
-            : `Commit ${side.toLowerCase()} order`;
+            : orderType === "twap"
+              ? `Commit ${chunkCount}-slice ${side.toLowerCase()}`
+              : `Commit ${side.toLowerCase()} order`;
 
   return (
     <GhostPageShell
@@ -536,7 +548,11 @@ export default function OrdersPage() {
         <div className="lg:w-[380px] shrink-0">
           <div className="rounded-3xl bg-surface border border-border p-5 lg:sticky lg:top-[88px]">
             <h2 className="text-lg font-semibold mb-4">
-              {orderType === "limit" ? "New limit order" : "New market order"}
+              {orderType === "limit"
+                ? "New limit order"
+                : orderType === "twap"
+                  ? "New TWAP order"
+                  : "New market order"}
             </h2>
 
             {/* Order type */}
@@ -544,6 +560,7 @@ export default function OrdersPage() {
               {(
                 [
                   { id: "limit" as const, label: "Limit" },
+                  { id: "twap" as const, label: "TWAP" },
                   { id: "market" as const, label: "Market" },
                 ]
               ).map((t) => (
@@ -552,6 +569,11 @@ export default function OrdersPage() {
                   onClick={() => {
                     setOrderType(t.id);
                     setError(null);
+                    // A one-slice TWAP is just a limit order; give it a schedule worth pacing.
+                    if (t.id === "twap") {
+                      if (chunkCount <= 1) setChunks("4");
+                      if (!(Number(intervalMinutes) > 0)) setIntervalMinutes("60");
+                    }
                   }}
                   className={`flex-1 py-2 rounded-xl text-sm font-semibold transition-colors ${
                     orderType === t.id
@@ -631,10 +653,12 @@ export default function OrdersPage() {
             </div>
 
             {/* Price — limit only */}
-            {orderType === "limit" && (
+            {orderType !== "market" && (
               <div className="mb-3">
                 <div className="flex items-center justify-between text-sm text-text-tertiary mb-1.5">
-                  <span>Price ({quote.symbol})</span>
+                  <span>
+                    {orderType === "twap" ? "Worst price" : "Price"} ({quote.symbol})
+                  </span>
                   <span className="flex items-center gap-1">
                     <Lock className="w-3 h-3 text-primary" /> Committed
                   </span>
@@ -720,7 +744,21 @@ export default function OrdersPage() {
             </div>
 
             {/* Split and timing — limit only; a market order is one immediate slice. */}
-            {orderType === "limit" ? (
+            {orderType === "twap" ? (
+              <div className="mb-4 rounded-2xl bg-surface-2 px-3.5 py-3">
+                <p className="text-sm text-text-secondary mb-3">Schedule</p>
+                <div className="grid grid-cols-3 gap-2">
+                  <Field label="Slices" value={chunks} onChange={setChunks} />
+                  <Field label="Wait (min)" value={intervalMinutes} onChange={setIntervalMinutes} />
+                  <Field label="Expiry (h)" value={expiryHours} onChange={setExpiryHours} />
+                </div>
+                <p className="mt-2 text-[11px] text-text-tertiary leading-relaxed">
+                  Pacing is enforced on-chain: the contract rejects a slice larger than{" "}
+                  {formatToken(totalIn / chunkCount)} {tokenIn.symbol}, or one that arrives before the
+                  wait has elapsed. Nobody can accelerate the schedule — not even you.
+                </p>
+              </div>
+            ) : orderType === "limit" ? (
               <details className="mb-4 rounded-2xl bg-surface-2 px-3.5 py-3">
                 <summary className="text-sm text-text-secondary cursor-pointer select-none">
                   Split and timing
@@ -742,7 +780,22 @@ export default function OrdersPage() {
               <Info className="w-3.5 h-3.5 text-primary shrink-0 mt-0.5" />
               <p className="text-xs text-text-secondary leading-relaxed">
                 {hasAmount && (orderType === "market" || hasPrice) && marketPrice !== null ? (
-                  orderType === "market" ? (
+                  orderType === "twap" ? (
+                    <>
+                      {side === "BUY" ? "Buy" : "Sell"}{" "}
+                      <span className="text-foreground font-medium">
+                        {formatToken(amountNumber)} {base.symbol}
+                      </span>{" "}
+                      in {chunkCount} slices of{" "}
+                      {formatToken(amountNumber / chunkCount)} {base.symbol}, at most one every{" "}
+                      {Number(intervalMinutes) || 0} min, never worse than{" "}
+                      <span className="text-foreground font-medium">
+                        {formatPrice(priceNumber)} {quote.symbol}
+                      </span>
+                      . Expires in {Number(expiryHours) || 24} h; whatever is unfilled by then simply
+                      stays in your private balance.
+                    </>
+                  ) : orderType === "market" ? (
                     <>
                       {side === "BUY" ? "Buy" : "Sell"}{" "}
                       <span className="text-foreground font-medium">
@@ -819,9 +872,9 @@ export default function OrdersPage() {
             )}
 
             <p className="text-xs text-text-tertiary mt-3 text-center leading-relaxed">
-              {orderType === "limit"
-                ? "Only the fingerprint of your terms goes on-chain; the terms stay in this browser."
-                : "One slice, filled immediately, settling into your private balance."}
+              {orderType === "market"
+                ? "One slice, filled immediately, settling into your private balance."
+                : "Only the fingerprint of your terms goes on-chain; the terms stay in this browser."}
             </p>
           </div>
         </div>

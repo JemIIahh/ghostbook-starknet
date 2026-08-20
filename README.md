@@ -175,23 +175,52 @@ ghostbook/
 
 ## Status
 
-The Cairo anonymizer (19 passing tests) and the Starknet client layer are complete, and the UI is
-ported: `/balance` covers shield, private send, withdraw and shielded balances; `/orders` covers
-the plan builder, live Ekubo quotes and per-slice fills with on-chain progress. The frontend's
-`planHash()` is pinned against the contract by `test_plan_hash_matches_frontend`, so the two can't
-silently diverge.
+**Live on Starknet mainnet.** `GhostBookAnonymizer` is declared and deployed, bound to the STRK20
+privacy pool:
 
-The anonymizer is live on Starknet mainnet at
-`0x0254fc4294398776cab056becb9630b996af2c10628e225ac7559e2d9069bacb`
-(class `0x2facd5d4f80f5343e3195e744f97b24b8ed4f37abb3ff85c5b69e9611e0327e`), bound to the STRK20
-privacy pool — `get_privacy_pool` echoes it, and `compute_plan_hash` on the deployed contract agrees
-with the frontend's `planHash()` for a real ETH/USDC plan.
+| | |
+|---|---|
+| Contract | [`0x0254fc4294398776cab056becb9630b996af2c10628e225ac7559e2d9069bacb`](https://voyager.online/contract/0x0254fc4294398776cab056becb9630b996af2c10628e225ac7559e2d9069bacb) |
+| Class | [`0x2facd5d4f80f5343e3195e744f97b24b8ed4f37abb3ff85c5b69e9611e0327e`](https://voyager.online/class/0x02facd5d4f80f5343e3195e744f97b24b8ed4f37abb3ff85c5b69e9611e0327e) |
+| Bound pool | `get_privacy_pool` returns the STRK20 pool it was constructed with |
 
-Not done yet: the three mainnet fills and demo video recorded in `strk20.json`, and a hosted demo.
+Verified against the deployed instance rather than only in tests:
 
-GhostBook began as a TEE-based confidential DEX on Flare Coston2 (Uniswap V3 fork + `PrivacyRouter`).
-That stack has been removed: on Starknet the privacy is protocol-level via STRK20 rather than
-bolted on at the app layer, and settlement uses Ekubo's existing liquidity instead of a bespoke AMM.
+- `compute_plan_hash` on mainnet equals the frontend's `planHash()` for a real ETH/USDC plan, so the
+  off-chain mirror holds in production and not just under `snforge`.
+- `required_out` matches the frontend's integer division exactly, so the minimum-output figure the UI
+  shows is the number the contract enforces.
+- 19 `snforge` tests cover every enforced term, including the frontend hash pin.
+
+Complete: the Cairo anonymizer, the Starknet client layer, `/balance` (shield, private send,
+withdraw, shielded balances) and `/orders` (limit / TWAP / market plan builder, live Ekubo quoting,
+per-slice fills with on-chain progress and `SliceFilled` verification).
+
+## Known limitation: viewing-key registration
+
+**GhostBook cannot currently complete a private transaction on mainnet, and no dapp can.** This is a
+protocol boundary, not a missing feature, and it is worth stating plainly.
+
+The pool keys every private balance to a viewing key (`get_public_key(user_addr)`) and reverts with
+`NOT_REGISTERED` for any address without one. Registration is `ClientAction::SetViewingKey`. The
+Starknet Wallet API's action union is:
+
+```ts
+type STRK20_ACTION = STRK20_DEPOSIT_ACTION | STRK20_WITHDRAW_ACTION
+                   | STRK20_TRANSFER_ACTION | STRK20_INVOKE_ACTION
+```
+
+There is no registration action, so an app has no way to send one — by design, since the viewing key
+is the wallet's secret. The official [STRK20 starter kit](https://github.com/Akashneelesh/strk20-starter-kit)
+contains no registration code either; it assumes an already-registered wallet.
+
+Registration is **per address, not per app**: once any STRK20 client registers a viewing key, every
+app works for that address. `/balance` detects the state up front and says so, rather than letting the
+user spend a transaction to discover it.
+
+Deposits additionally require an FPI screening attestation verified on-chain, which
+[per the STRK20 docs](https://strk20.starknet.io/build) "running your own prover doesn't bypass".
+Self-hosting proving infrastructure therefore does not route around this.
 
 ## References
 

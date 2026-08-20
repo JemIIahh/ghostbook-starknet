@@ -1,9 +1,5 @@
 {
-  "transactions": [
-    "0x005d02f76073e0c4c811d2cf43d0a52956366a35300c23248361f0a1dad6915b",
-    "0x03391fac6441050a04e4abe214113968356c95e5f99f257a1e820cfceeeb356c",
-    "0x0468b1ae56e5301edb5546a1a60807cad24e428975c0de4fc6dda4398aca48cf"
-  ],
+  "transactions": [],
   "contracts": [
     "0x0254fc4294398776cab056becb9630b996af2c10628e225ac7559e2d9069bacb"
   ],
