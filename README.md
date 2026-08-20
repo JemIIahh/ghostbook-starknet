@@ -175,6 +175,8 @@ ghostbook/
 
 ## Status
 
+**Live demo: [ghostbook-starknet.vercel.app](https://ghostbook-starknet.vercel.app)**
+
 **Live on Starknet mainnet.** `GhostBookAnonymizer` is declared and deployed, bound to the STRK20
 privacy pool:
 
