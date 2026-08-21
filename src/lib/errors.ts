@@ -9,7 +9,7 @@
 /** `GhostBookAnonymizer` and Ekubo assertion strings, mapped to plain language. */
 const CONTRACT_ERRORS: Record<string, string> = {
   NOT_REGISTERED:
-    "Your wallet hasn't registered a viewing key with the STRK20 pool yet. Set up your private balance in the wallet, then try again.",
+    "Your wallet has no viewing key registered with the STRK20 pool. Only the wallet can register one — apps have no way to. Set up the private balance in your wallet, then try again.",
   NOT_PRIVACY_POOL: "Only the STRK20 pool can fill a slice. Check the anonymizer address.",
   SLICE_TOO_LARGE: "That slice is bigger than the plan's per-fill cap.",
   PLAN_EXHAUSTED: "This plan's total budget is already filled.",

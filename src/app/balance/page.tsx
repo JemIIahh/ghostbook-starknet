@@ -289,10 +289,12 @@ export default function BalancePage() {
           <div className="text-sm leading-relaxed">
             <p className="text-foreground font-medium">Private balance not set up yet</p>
             <p className="text-text-secondary mt-1">
-              The STRK20 pool has no viewing key for this address, so it will reject every action
-              with <code className="font-mono text-xs">NOT_REGISTERED</code>. Only your wallet can
-              register one — the wallet API gives apps no way to do it. Set up the private balance in{" "}
-              {wallet?.name ?? "your wallet"}, then reload.
+              The pool holds no viewing key for this address —{" "}
+              <code className="font-mono text-xs">get_public_key</code> returns 0. Registering one is{" "}
+              <code className="font-mono text-xs">SetViewingKey</code>, which the wallet API does not
+              expose to apps, so only {wallet?.name ?? "your wallet"} can do it. Every pool action
+              also needs a proof-carrying transaction, which only a wallet or service with a proving
+              backend can produce.
             </p>
             <div className="mt-2.5 flex flex-wrap gap-2">
               <button

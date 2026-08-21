@@ -203,9 +203,9 @@ per-slice fills with on-chain progress and `SliceFilled` verification).
 **GhostBook cannot currently complete a private transaction on mainnet, and no dapp can.** This is a
 protocol boundary, not a missing feature, and it is worth stating plainly.
 
-The pool keys every private balance to a viewing key (`get_public_key(user_addr)`) and reverts with
-`NOT_REGISTERED` for any address without one. Registration is `ClientAction::SetViewingKey`. The
-Starknet Wallet API's action union is:
+The pool keys every private balance to a viewing key, readable as `get_public_key(user_addr)`, which
+returns 0 for an unregistered address. Registration is `ClientAction::SetViewingKey`. The Starknet
+Wallet API's action union is:
 
 ```ts
 type STRK20_ACTION = STRK20_DEPOSIT_ACTION | STRK20_WITHDRAW_ACTION
@@ -215,6 +215,17 @@ type STRK20_ACTION = STRK20_DEPOSIT_ACTION | STRK20_WITHDRAW_ACTION
 There is no registration action, so an app has no way to send one — by design, since the viewing key
 is the wallet's secret. The official [STRK20 starter kit](https://github.com/Akashneelesh/strk20-starter-kit)
 contains no registration code either; it assumes an already-registered wallet.
+
+A second, harder gate sits underneath: `apply_actions` calls `validate_proof`, which reads
+`tx_info.proof_facts` and asserts it is non-empty. **Every** pool action — registration included —
+must therefore arrive as a proof-carrying transaction produced by a proving backend. Ready reports
+`NOT_REGISTERED`, which is its own error string rather than the pool's (the pool raises
+`SENDER_NOT_REGISTERED` / `RECIPIENT_NOT_REGISTERED`), so the wallet is aware of registration but
+this build does not create one.
+
+What *is* verifiable against mainnet today without either: `compile_actions` is a `view`, and calling
+it on the live pool with a `SetViewingKey` client action returns the real `ServerAction` sequence — a
+free read that confirms the action encoding this app builds is the one the pool expects.
 
 Registration is **per address, not per app**: once any STRK20 client registers a viewing key, every
 app works for that address. `/balance` detects the state up front and says so, rather than letting the
